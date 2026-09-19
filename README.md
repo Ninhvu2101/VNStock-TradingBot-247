@@ -23,12 +23,20 @@
   - Tuân thủ nghiêm ngặt **chu kỳ thanh toán T+2.5** của thị trường Việt Nam (không cho phép bán non trước ngày T+2.5).
   - Tự động cắt lỗ dứt khoát khi vi phạm ngưỡng **Stop Loss -5%**.
   - Tự động kích hoạt chốt lời từng phần khi chạm mục tiêu **Take Profit +12% đến +18%**.
-- **Danh mục Tích sản (Long-term Investment):**
-  - Quản lý vị thế mua gom cổ phiếu cơ bản tốt, định giá thấp, không bị ép cắt lỗ ngắn hạn.
-- **Tính toán chi tiết Phí & Thuế:** Khấu trừ phí giao dịch (0.15%) và thuế thu nhập chứng khoán (0.10%) theo chuẩn Bộ Tài Chính.
+- **Chế độ Auto-Trading Toàn diện (Auto-Buy & Auto-Sell):**
+  - Khi phát hiện cổ phiếu nổ Vol $\ge 1.8x$ MA20 và giá tăng mạnh vượt cản EMA10, hệ thống tự động tính toán khối lượng theo lô 100 và giải ngân an toàn (tối đa 20% vốn/mã).
+  - Tự động cắt lỗ và chốt lời theo chu kỳ T+2.5.
+  - Bật/tắt chế độ linh hoạt chỉ bằng lệnh `/autotrade on` hoặc `/autotrade off` trên Telegram.
 
-### 4. ⏰ Vận Hành 24/7 Tự Động Hóa Hoàn Toàn (Trading Scheduler)
-- **Trong phiên (Thứ 2 - Thứ 6, 09:15 - 11:30 & 13:00 - 14:45):** Quét dòng tiền định kỳ mỗi 15 phút, phát hiện điểm nổ vol và kiểm tra trạng thái SL/TP danh mục.
+### 4. 📊 Đồng Bộ Google Sheets & Google Drive Trực Tiếp Thời Gian Thực
+- Mọi dữ liệu danh mục, lệnh mua/bán và lịch sử quét dòng tiền được đồng bộ trực tiếp lên **Google Sheets trên Google Drive**:
+  - Tab `Trading_Portfolio`: Theo dõi danh mục nắm giữ, lãi/lỗ %, ngày hàng về T+2.5 trực tiếp trên điện thoại/máy tính.
+  - Tab `Trading_Orders`: Nhật ký mọi lệnh mua/bán, thuế phí và lý do vào lệnh.
+  - Tab `Smart_Money_Alerts`: Lịch sử các lần cá mập gom hàng trong phiên.
+- Nhận link mở Google Sheet tức thì qua lệnh `/sheet` trên Telegram.
+
+### 5. ⏰ Vận Hành 24/7 Tự Động Hóa Hoàn Toàn (Trading Scheduler)
+- **Trong phiên (Thứ 2 - Thứ 6, 09:15 - 11:30 & 13:00 - 14:45):** Quét dòng tiền định kỳ mỗi 15 phút, tự động giải ngân mua hoặc kiểm tra trạng thái SL/TP danh mục.
 - **Kết phiên (15:15):** Gửi báo cáo tổng kết thị trường, tổng tài sản, lãi/lỗ trong ngày về Telegram.
 - **Buổi tối (20:00):** Tự động phân tích chuyên sâu mã cổ phiếu hút tiền mạnh nhất hôm nay để chuẩn bị kế hoạch giải ngân cho phiên sáng mai.
 - **Cơ chế Watchdog:** Tự động hồi sinh tiến trình khi gặp sự cố gián đoạn kết nối mạng hoặc lỗi máy chủ.
@@ -42,7 +50,9 @@
 | `/start` hoặc `/help` | Khởi tạo bot, hiển thị menu và các nút bấm nhanh | `/start` |
 | `/scan` hoặc `/top` | Quét ngay các mã có dòng tiền lớn cá mập hôm nay | `/scan` |
 | `/portfolio` hoặc `/p` | Xem chi tiết danh mục nắm giữ, lãi/lỗ thực tế và lịch hàng về T+2.5 | `/portfolio` |
-| `/buy <MÃ> <KL> [ngan/dai]` | Đặt lệnh mua cổ phiếu vào danh mục lướt sóng hoặc tích sản | `/buy HPG 1000 ngan` |
+| `/sheet` | Mở trực tiếp file Google Sheets trên Google Drive theo dõi online | `/sheet` |
+| `/autotrade [on/off]` | Bật hoặc tắt chế độ Tự động Mua & Bán khi có dòng tiền cá mập | `/autotrade on` |
+| `/buy <MÃ> <KL> [ngan/dai]` | Đặt lệnh mua thủ công cổ phiếu vào danh mục | `/buy HPG 1000 ngan` |
 | `/sell <MÃ> [KL]` | Bán chốt lời / cắt lỗ cổ phiếu (kiểm tra T+2.5 tự động) | `/sell SSI 500` |
 | `<MÃ>` | Gõ trực tiếp tên mã để AI phân tích kỹ thuật và định giá | `FPT` |
 | `/status` | Kiểm tra tình trạng hoạt động CPU, RAM và tiến trình bot 24/7 | `/status` |

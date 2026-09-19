@@ -53,6 +53,34 @@ except ImportError:
         logger.info(f"[BROADCAST PREVIEW]\n{text}")
 
 
+# Cấu hình Tự động Giao dịch (Auto-Trading: Tự Mua & Tự Bán)
+AUTOTRADE_FILE = os.path.join(BASE_DIR, "data", "autotrade_config.json")
+
+def get_autotrade_config() -> dict:
+    default_cfg = {
+        "enabled": True,
+        "max_stocks_in_portfolio": 5,
+        "allocation_pct_per_stock": 0.20,
+        "max_capital_per_order": 100_000_000,
+        "min_vol_ratio": 1.8,
+        "min_price_change": 1.5,
+        "min_turnover_billion": 15.0
+    }
+    if os.path.exists(AUTOTRADE_FILE):
+        try:
+            with open(AUTOTRADE_FILE, "r", encoding="utf-8") as f:
+                return {**default_cfg, **json.load(f)}
+        except Exception:
+            pass
+    return default_cfg
+
+def set_autotrade_enabled(enabled: bool):
+    cfg = get_autotrade_config()
+    cfg["enabled"] = enabled
+    os.makedirs(os.path.dirname(AUTOTRADE_FILE), exist_ok=True)
+    with open(AUTOTRADE_FILE, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, indent=2)
+
 # Bộ đệm để chống spam thông báo cho cùng một mã cổ phiếu (chỉ báo lại sau 90 phút)
 LAST_ALERTED_TIME: Dict[str, datetime] = {}
 THROTTLE_MINUTES = 90
@@ -137,6 +165,70 @@ def run_session_scan_and_alert():
             msg += "───────────────────\n💡 *Khuyến nghị:* Mua đón sóng dòng tiền, tuân thủ T+2.5 và SL -5%."
             broadcast_message(msg)
             logger.info(f"Đã phát cảnh báo dòng tiền cho {len(alert_items)} mã: {[x['ticker'] for x in alert_items]}")
+
+        # Đồng bộ lịch sử quét bùng nổ dòng tiền lên Google Sheets
+        try:
+            from trading_sheet_sync import sheet_sync
+            if hot_stocks:
+                sheet_sync.log_scanner_to_sheet(hot_stocks)
+        except Exception:
+            pass
+
+        # 1.1 TỰ ĐỘNG GIẢI NGÂN MUA (AUTO-BUY) NẾU BẬT CHẾ ĐỘ AUTO-TRADING
+        cfg = get_autotrade_config()
+        if cfg.get("enabled") and alert_items:
+            current_holdings = set(portfolio.data.get("short_term_positions", {}).keys()) | set(portfolio.data.get("long_term_positions", {}).keys())
+            max_stocks = cfg.get("max_stocks_in_portfolio", 5)
+
+            for stock in alert_items:
+                ticker = stock["ticker"]
+                if ticker in current_holdings:
+                    continue
+                if len(current_holdings) >= max_stocks:
+                    break
+
+                # Điều kiện lọc cổ phiếu có dòng tiền bùng nổ thực sự
+                if stock["vol_ratio"] >= cfg.get("min_vol_ratio", 1.8) and stock["price_change_pct"] >= cfg.get("min_price_change", 1.5):
+                    available_cash = portfolio.data.get("cash", 0)
+                    if available_cash < 15_000_000:
+                        break
+
+                    target_invest = min(
+                        available_cash * cfg.get("allocation_pct_per_stock", 0.20),
+                        cfg.get("max_capital_per_order", 100_000_000)
+                    )
+                    price = stock["price"]
+                    if price <= 0:
+                        continue
+
+                    # Làm tròn số lượng cổ phiếu theo lô 100 chuẩn HOSE/HNX
+                    raw_shares = int(target_invest // (price * 1.0015))
+                    shares = (raw_shares // 100) * 100
+
+                    if shares >= 100:
+                        res = portfolio.buy(
+                            ticker=ticker,
+                            price=price,
+                            shares=shares,
+                            portfolio_type="short_term",
+                            rationale=f"Auto-Trading: Dòng tiền nổ {stock['vol_ratio']:.1f}x MA20, Giá +{stock['price_change_pct']:.1f}%"
+                        )
+                        if res.get("success"):
+                            current_holdings.add(ticker)
+                            auto_buy_msg = (
+                                f"🤖 *[AUTO-TRADING: TỰ ĐỘNG KHỚP LỆNH MUA]* 🤖\n"
+                                f"───────────────────\n"
+                                f"Hệ thống đã tự động mua gom theo dòng tiền cá mập:\n"
+                                f"• *Mã cổ phiếu:* `{ticker}`\n"
+                                f"• *Khối lượng:* `{shares:,} cp` (Lô 100)\n"
+                                f"• *Giá khớp:* `{price:,.0f} VND`\n"
+                                f"• *Tổng vốn:* `{(price * shares * 1.0015):,.0f} VND`\n"
+                                f"• *Kỷ luật:* Cắt lỗ -5% | Chốt lời +15% | Hàng về T+2.5\n"
+                                f"• *Google Sheets:* Đã lưu vào Sheet & Drive trực tiếp!\n"
+                                f"👉 Xem bảng tính online: gõ `/sheet`"
+                            )
+                            broadcast_message(auto_buy_msg)
+                            logger.info(f"Auto-Buy thành công: {ticker} {shares} cp")
 
         # 2. Kiểm tra Cắt lỗ (-5%) và Chốt lời (+15%) cho danh mục
         positions = list(portfolio.data.get("short_term_positions", {}).keys()) + list(portfolio.data.get("long_term_positions", {}).keys())

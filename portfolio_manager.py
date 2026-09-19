@@ -29,6 +29,11 @@ PORTFOLIO_FILE = os.path.join(os.path.dirname(__file__), "data", "portfolio.json
 FEE_RATE = 0.0015  # Phí giao dịch 0.15%
 TAX_RATE = 0.0010  # Thuế bán 0.10%
 
+try:
+    from trading_sheet_sync import sheet_sync
+except Exception:
+    sheet_sync = None
+
 
 def _get_settlement_date(trade_date: str) -> str:
     """Tính ngày cổ phiếu về tài khoản (T+2) theo lịch làm việc Việt Nam (bỏ qua T7, CN)."""
@@ -118,6 +123,25 @@ class PortfolioManager:
             }
 
         self._save()
+
+        # Đồng bộ Google Sheets và Google Drive
+        if sheet_sync:
+            try:
+                sheet_sync.log_order_to_sheet({
+                    "ticker": clean_ticker,
+                    "action": "MUA",
+                    "shares": shares,
+                    "price": price,
+                    "total_value": total_cost,
+                    "pnl": 0,
+                    "pnl_pct": 0,
+                    "portfolio_type": "Ngắn hạn" if portfolio_type == "short_term" else "Dài hạn",
+                    "rationale": rationale or "Mở vị thế mua"
+                })
+                sheet_sync.sync_portfolio_to_sheet(self.data, {clean_ticker: price})
+            except Exception:
+                pass
+
         return {
             "success": True,
             "message": f"✅ Đã MUA thành công {shares:,} cổ phiếu {clean_ticker} giá {price:,.0f} VND!\n"
@@ -195,6 +219,25 @@ class PortfolioManager:
             pos["shares"] -= sell_shares
 
         self._save()
+
+        # Đồng bộ Google Sheets và Google Drive
+        if sheet_sync:
+            try:
+                sheet_sync.log_order_to_sheet({
+                    "ticker": clean_ticker,
+                    "action": "BÁN",
+                    "shares": sell_shares,
+                    "price": price,
+                    "total_value": net_proceeds,
+                    "pnl": pnl,
+                    "pnl_pct": pnl_pct,
+                    "portfolio_type": "Ngắn hạn" if p_type == "short_term" else "Dài hạn",
+                    "rationale": rationale or "Tất toán vị thế"
+                })
+                sheet_sync.sync_portfolio_to_sheet(self.data, {clean_ticker: price})
+            except Exception:
+                pass
+
         pnl_sign = "+" if pnl > 0 else ""
         icon = "🎉 CHỐT LỜI" if pnl > 0 else "🛑 CẮT LỖ"
 

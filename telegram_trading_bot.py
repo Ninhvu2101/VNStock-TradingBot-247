@@ -140,9 +140,12 @@ def get_main_keyboard():
     markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
     btn_scan = types.KeyboardButton("🌊 Quét Dòng Tiền")
     btn_portfolio = types.KeyboardButton("💼 Xem Danh Mục")
+    btn_sheet = types.KeyboardButton("📈 Google Sheet")
+    btn_autotrade = types.KeyboardButton("🤖 Auto-Trading")
     btn_top = types.KeyboardButton("🔥 Top Cổ Phiếu")
     btn_help = types.KeyboardButton("❓ Trợ Giúp")
     markup.add(btn_scan, btn_portfolio)
+    markup.add(btn_sheet, btn_autotrade)
     markup.add(btn_top, btn_help)
     return markup
 
@@ -158,8 +161,10 @@ def handle_start(message):
         "📌 *CÁC CÂU LỆNH CHÍNH:*\n"
         "• `/scan` : Quét ngay các mã có dòng tiền lớn cá mập vào phiên hôm nay\n"
         "• `/portfolio` hoặc `/p` : Xem danh mục đầu tư (Lướt sóng T+ & Tích sản dài hạn)\n"
+        "• `/sheet` : Lấy đường link mở Google Sheet & Drive theo dõi danh mục trực tuyến\n"
+        "• `/autotrade [on/off]` : Bật / tắt chế độ tự động mua bán khi phát hiện cá mập\n"
         "• `/analyze <mã>` (hoặc gõ thẳng `HPG`, `FPT`): Yêu cầu AI phân tích kỹ thuật, cơ bản & tin tức\n"
-        "• `/buy <mã> <khối_lượng> [ngan/dai]` : Mua cổ phiếu vào danh mục (ví dụ: `/buy HPG 1000 ngan`)\n"
+        "• `/buy <mã> <khối_lượng> [ngan/dai]` : Mua cổ phiếu vào danh mục\n"
         "• `/sell <mã> [khối_lượng]` : Bán chốt lời/cắt lỗ (tuân thủ T+2.5)\n"
         "• `/status` : Kiểm tra trạng thái máy chủ và tiến trình 24/7\n\n"
         "⚡ *Bạn cũng có thể bấm các nút menu nhanh bên dưới!*"
@@ -258,6 +263,81 @@ def handle_sell(message):
     bot.send_message(chat_id, res["message"])
 
 
+@bot.message_handler(commands=["sheet"])
+def handle_sheet(message):
+    chat_id = message.chat.id
+    add_subscriber(chat_id)
+    try:
+        from trading_sheet_sync import sheet_sync
+        link = sheet_sync.get_sheet_link()
+    except Exception:
+        link = "https://docs.google.com/spreadsheets/d/1NZl2d8XaOD1COe6Qg1xb-7qn8SD9PKdGTTPJ7AUH2PE/edit"
+
+    msg = (
+        "📈 *GOOGLE SHEETS & GOOGLE DRIVE - AUTO-TRADING*\n"
+        "───────────────────\n"
+        "Toàn bộ dữ liệu danh mục, lịch sử lệnh mua/bán và tín hiệu dòng tiền được đồng bộ trực tiếp lên Google Drive:\n\n"
+        f"🔗 [BẤM ĐỂ MỞ GOOGLE SHEET TRÊN DRIVER]({link})\n\n"
+        "📌 *Các Tab Trong Bảng Tính:*\n"
+        "• `Trading_Portfolio`: Danh mục đang nắm giữ, giá vốn, giá hiện tại, lãi/lỗ & ngày về T+2.5\n"
+        "• `Trading_Orders`: Nhật ký mọi lệnh mua/bán, chốt lời, cắt lỗ, thuế phí\n"
+        "• `Smart_Money_Alerts`: Lịch sử các mã cá mập bùng nổ thanh khoản trong phiên"
+    )
+    send_chunked_message(chat_id, msg, reply_markup=get_main_keyboard())
+
+
+@bot.message_handler(commands=["autotrade"])
+def handle_autotrade(message):
+    chat_id = message.chat.id
+    add_subscriber(chat_id)
+    try:
+        from trading_scheduler import get_autotrade_config, set_autotrade_enabled
+    except Exception:
+        bot.send_message(chat_id, "⚠️ Không tìm thấy module scheduler.")
+        return
+
+    parts = message.text.strip().split()
+    if len(parts) >= 2:
+        action = parts[1].lower()
+        if action in ("on", "bat", "1", "true", "start"):
+            set_autotrade_enabled(True)
+            bot.send_message(
+                chat_id,
+                "🟢 *ĐÃ BẬT CHẾ ĐỘ AUTO-TRADING TOÀN DIỆN!*\n"
+                "───────────────────\n"
+                "• Trong phiên (09:15 - 14:45), hệ thống sẽ TỰ ĐỘNG MUA khi phát hiện cổ phiếu nổ Vol >= 1.8x MA20 & Giá tăng mạnh.\n"
+                "• Tự động Cắt lỗ (-5%) và Chốt lời (+15%) theo chu kỳ T+2.5.\n"
+                "• Tự động lưu mọi giao dịch vào Google Sheets trên Google Drive!",
+                reply_markup=get_main_keyboard()
+            )
+            return
+        elif action in ("off", "tat", "0", "false", "stop"):
+            set_autotrade_enabled(False)
+            bot.send_message(
+                chat_id,
+                "⏸️ *ĐÃ TẮT CHẾ ĐỘ TỰ ĐỘNG MUA!*\n"
+                "───────────────────\n"
+                "Bot sẽ chỉ gửi cảnh báo dòng tiền cá mập về Telegram để bạn tự quyết định đặt lệnh `/buy`.",
+                reply_markup=get_main_keyboard()
+            )
+            return
+
+    cfg = get_autotrade_config()
+    st = "🟢 ĐANG BẬT (Tự động Mua & Bán)" if cfg.get("enabled") else "⏸️ ĐANG TẮT (Chỉ cảnh báo)"
+    msg = (
+        "🤖 *CẤU HÌNH AUTO-TRADING CHỨNG KHOÁN*\n"
+        "───────────────────\n"
+        f"• Trạng thái hiện tại: *{st}*\n"
+        f"• Tỷ trọng tối đa mỗi mã: `{cfg.get('allocation_pct_per_stock', 0.2)*100:.0f}%` tài sản\n"
+        f"• Tối đa số mã nắm giữ: `{cfg.get('max_stocks_in_portfolio', 5)}` cổ phiếu\n"
+        f"• Ngưỡng Vol bùng nổ: `>= {cfg.get('min_vol_ratio', 1.8)}x` MA20\n\n"
+        "📌 *Cách điều khiển:*\n"
+        "• `/autotrade on` : Bật tự động mua khi có cá mập\n"
+        "• `/autotrade off` : Tắt tự động mua, chỉ nhận tin báo"
+    )
+    send_chunked_message(chat_id, msg, reply_markup=get_main_keyboard())
+
+
 @bot.message_handler(commands=["status"])
 def handle_status(message):
     chat_id = message.chat.id
@@ -288,6 +368,10 @@ def handle_text(message):
         handle_scan(message)
     elif text == "💼 Xem Danh Mục":
         handle_portfolio(message)
+    elif text == "📈 Google Sheet":
+        handle_sheet(message)
+    elif text == "🤖 Auto-Trading":
+        handle_autotrade(message)
     elif text == "❓ Trợ Giúp":
         handle_start(message)
     elif text.startswith("/analyze ") or text.startswith("/a "):
