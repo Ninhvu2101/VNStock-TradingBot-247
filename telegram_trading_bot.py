@@ -271,7 +271,7 @@ def handle_sheet(message):
         from trading_sheet_sync import sheet_sync
         link = sheet_sync.get_sheet_link()
     except Exception:
-        link = "https://docs.google.com/spreadsheets/d/1NZl2d8XaOD1COe6Qg1xb-7qn8SD9PKdGTTPJ7AUH2PE/edit"
+        link = "https://docs.google.com/spreadsheets/d/1mjYsI-sXYgqAaebNXJb8BA4hwLZWxh-Cqji8p_F-dwo/edit"
 
     msg = (
         "📈 *GOOGLE SHEETS & GOOGLE DRIVE - AUTO-TRADING*\n"

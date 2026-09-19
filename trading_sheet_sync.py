@@ -34,8 +34,8 @@ PROJECT_ROOT = os.path.dirname(BASE_DIR)
 from dotenv import load_dotenv
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
-WEBAPP_URL = os.getenv("APPSHEET_WEBAPP_URL", "").strip()
-SPREADSHEET_ID = os.getenv("APPSHEET_SPREADSHEET_ID", "1NZl2d8XaOD1COe6Qg1xb-7qn8SD9PKdGTTPJ7AUH2PE").strip()
+WEBAPP_URL = os.getenv("TRADING_WEBAPP_URL", os.getenv("APPSHEET_WEBAPP_URL", "")).strip()
+SPREADSHEET_ID = os.getenv("TRADING_SPREADSHEET_ID", "1mjYsI-sXYgqAaebNXJb8BA4hwLZWxh-Cqji8p_F-dwo").strip()
 SECRET_KEY = os.getenv("CLOUD_SCRIPT_SECRET", "MyAgentSecret_2026_KeyX").strip()
 
 PORTFOLIO_COLUMNS = [
