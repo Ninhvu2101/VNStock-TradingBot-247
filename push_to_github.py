@@ -132,13 +132,10 @@ def push_to_github(
     files = get_all_files_to_upload(BASE_DIR)
     print(f"✅ Tìm thấy {len(files)} file cần tải lên (Đã bảo vệ lọc bỏ file bí mật .env, keys).")
 
-    # 4. Tải Blobs lên GitHub Git Database đa luồng
-    print(f"[4/5] Đang tải song song {len(files)} file lên GitHub Blobs (8 luồng)...", flush=True)
+    # 4. Tải Blobs lên GitHub Git Database
+    print("[4/5] Đang tải các file lên GitHub Blobs...")
     tree_items = []
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-
-    def _upload_single_file(item):
-        abs_path, rel_path = item
+    for i, (abs_path, rel_path) in enumerate(files, 1):
         try:
             with open(abs_path, "rb") as f:
                 content_bytes = f.read()
@@ -147,37 +144,24 @@ def push_to_github(
             blob_res = requests.post(
                 f"https://api.github.com/repos/{username}/{repo_name}/git/blobs",
                 headers=headers,
-                json={"content": b64_content, "encoding": "base64"},
-                timeout=30
+                json={"content": b64_content, "encoding": "base64"}
             )
             if blob_res.status_code in (200, 201):
                 blob_sha = blob_res.json()["sha"]
-                return {
+                tree_items.append({
                     "path": rel_path,
                     "mode": "100644",
                     "type": "blob",
                     "sha": blob_sha
-                }
+                })
+                print(f"   [{i}/{len(files)}] Đã tải: {rel_path}")
             else:
-                print(f"   ⚠️ Lỗi tải file {rel_path}: {blob_res.text}", flush=True)
-                return None
+                print(f"   ⚠️ Lỗi tải file {rel_path}: {blob_res.text}")
         except Exception as e:
-            print(f"   ⚠️ Lỗi đọc file {abs_path}: {e}", flush=True)
-            return None
-
-    completed_count = 0
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        futures = {executor.submit(_upload_single_file, item): item for item in files}
-        for future in as_completed(futures):
-            res = future.result()
-            completed_count += 1
-            if res:
-                tree_items.append(res)
-            if completed_count % 20 == 0 or completed_count == len(files):
-                print(f"   • Đã tải: {completed_count}/{len(files)} files...", flush=True)
+            print(f"   ⚠️ Lỗi đọc file {abs_path}: {e}")
 
     if not tree_items:
-        print("❌ Không có file nào được tải lên!", flush=True)
+        print("❌ Không có file nào được tải lên!")
         return False
 
     # 5. Tạo Git Tree, Commit và Cập nhật nhánh main
