@@ -56,14 +56,16 @@ def scan_smart_money(
     """
     print(f"[*] Đang tải dữ liệu {len(UNIVERSE_VN)} cổ phiếu hàng đầu Việt Nam...")
     try:
-        # Tải dữ liệu 1 tháng gần nhất của toàn bộ rổ cổ phiếu (1 batch call duy nhất)
-        data = yf.download(UNIVERSE_VN, period="1mo", progress=False)
+        # Tải dữ liệu 3 tháng gần nhất để tính chuẩn MA20, EMA10 và hệ thống Ichimoku Kinko Hyo
+        data = yf.download(UNIVERSE_VN, period="3mo", progress=False)
         if data.empty or "Close" not in data or "Volume" not in data:
             print("[Lỗi] Không nhận được dữ liệu từ sàn!")
             return []
 
         close_df = data["Close"]
         vol_df = data["Volume"]
+        high_df = data.get("High", close_df)
+        low_df = data.get("Low", close_df)
 
         results = []
         latest_date_str = close_df.index[-1].strftime("%Y-%m-%d")
@@ -74,6 +76,8 @@ def scan_smart_money(
 
             c_series = close_df[symbol].dropna()
             v_series = vol_df[symbol].dropna()
+            h_series = high_df[symbol].dropna() if symbol in high_df else c_series
+            l_series = low_df[symbol].dropna() if symbol in low_df else c_series
 
             if len(c_series) < 5 or len(v_series) < 5:
                 continue
@@ -97,17 +101,46 @@ def scan_smart_money(
             vol_ratio = (current_vol / vol_sma) if vol_sma > 0 else 1.0
             turnover_billion = (current_price * current_vol) / 1_000_000_000.0
 
-            # Tính thêm EMA10 để đánh giá Breakout xu hướng
+            # Tính EMA10 và Hệ thống Ichimoku Kinko Hyo (Tenkan 9, Kijun 26, Senkou Span 52)
             ema10 = float(c_series.ewm(span=10, adjust=False).mean().iloc[-1])
             is_above_ema10 = current_price > ema10
 
+            t_len = min(9, len(h_series))
+            k_len = min(26, len(h_series))
+            b_len = min(52, len(h_series))
+
+            tenkan = float((h_series.iloc[-t_len:].max() + l_series.iloc[-t_len:].min()) / 2)
+            kijun = float((h_series.iloc[-k_len:].max() + l_series.iloc[-k_len:].min()) / 2)
+            span_a = (tenkan + kijun) / 2
+            span_b = float((h_series.iloc[-b_len:].max() + l_series.iloc[-b_len:].min()) / 2)
+
+            kumo_top = max(span_a, span_b)
+            kumo_bot = min(span_a, span_b)
+
+            is_above_kumo = current_price >= kumo_top
+            is_tk_cross = tenkan >= kijun
+
+            if is_above_kumo and is_tk_cross:
+                ichi_signal = "Trên Mây + TK Golden Cross ⚡"
+                ichi_bonus = 15.0
+            elif is_above_kumo:
+                ichi_signal = "Trên Mây Kumo ☁️"
+                ichi_bonus = 10.0
+            elif current_price < kumo_bot:
+                ichi_signal = "Dưới Mây Kumo 🔻"
+                ichi_bonus = -5.0
+            else:
+                ichi_signal = "Trong Mây Kumo ⏸️"
+                ichi_bonus = 0.0
+
             # Lọc các tiêu chí dòng tiền lớn
-            # Điểm dòng tiền (Money Flow Score): kết hợp Tỷ lệ Vol + % Tăng giá + Quy mô tiền
+            # Điểm dòng tiền (Money Flow Score): kết hợp Tỷ lệ Vol + % Tăng giá + Quy mô tiền + Ichimoku
             if vol_ratio >= min_vol_ratio and price_change_pct >= min_price_change and turnover_billion >= min_turnover_billion:
                 # Tính điểm sức mạnh dòng tiền
-                score = (vol_ratio * 35.0) + (price_change_pct * 15.0) + min(turnover_billion / 20.0, 30.0)
+                score = (vol_ratio * 30.0) + (price_change_pct * 15.0) + min(turnover_billion / 20.0, 25.0)
                 if is_above_ema10:
-                    score += 20.0  # Thưởng điểm cho việc vượt cản EMA10
+                    score += 15.0
+                score += ichi_bonus
 
                 clean_ticker = symbol.replace(".VN", "")
                 
@@ -129,6 +162,10 @@ def scan_smart_money(
                     "vol_ratio": round(vol_ratio, 2),
                     "turnover_billion": round(turnover_billion, 1),
                     "is_above_ema10": is_above_ema10,
+                    "tenkan": round(tenkan, 0),
+                    "kijun": round(kijun, 0),
+                    "kumo_range": f"{kumo_bot:,.0f} - {kumo_top:,.0f}",
+                    "ichi_signal": ichi_signal,
                     "score": round(score, 1),
                     "signal": signal
                 })
@@ -166,6 +203,8 @@ def format_scan_report(results: List[Dict[str, Any]]) -> str:
 
         msg += f"*{i}. {t}* | `{p:,.0f} VND` ({pct_sign}{pct}%)\n"
         msg += f"   • {sig}\n"
+        if item.get("ichi_signal"):
+            msg += f"   • Ichimoku: *{item['ichi_signal']}* (Mây `{item.get('kumo_range')}`)\n"
         msg += f"   • Thanh khoản: *{vr}x* MA20 (`{item['volume']:,}` cp)\n"
         msg += f"   • Giá trị GD: *{tb:,.1f} tỷ VNĐ*\n"
         msg += f"   • Lệnh xem AI: `/analyze {t}`\n\n"

@@ -399,7 +399,9 @@ def _process_analyze(chat_id: int, ticker: str):
 
     try:
         t_obj = yf.Ticker(sym)
-        hist = t_obj.history(period="1mo")
+        hist = t_obj.history(period="3mo")
+        if hist.empty:
+            hist = t_obj.history(period="1mo")
         if hist.empty:
             bot.send_message(chat_id, f"❌ Không tìm thấy dữ liệu cho mã `{clean_ticker}`!")
             return
@@ -413,10 +415,35 @@ def _process_analyze(chat_id: int, ticker: str):
         vol_sma20 = float(hist["Volume"].rolling(20).mean().iloc[-2]) if len(hist) >= 20 else float(hist["Volume"].mean())
         vol_ratio = vol / vol_sma20 if vol_sma20 > 0 else 1.0
 
-        # Phân tích nhanh chỉ báo
+        # Phân tích đường trung bình
         ema10 = float(hist["Close"].ewm(span=10, adjust=False).mean().iloc[-1])
         sma50 = float(hist["Close"].rolling(50, min_periods=10).mean().iloc[-1])
         trend = "Tăng ngắn hạn (Trên EMA10)" if cur_price > ema10 else "Điều chỉnh/Tích lũy (Dưới EMA10)"
+
+        # Phân tích Hệ thống Ichimoku Kinko Hyo (Tenkan 9, Kijun 26, Senkou Span 52)
+        h_series = hist["High"]
+        l_series = hist["Low"]
+        t_len = min(9, len(h_series))
+        k_len = min(26, len(h_series))
+        b_len = min(52, len(h_series))
+
+        tenkan = float((h_series.iloc[-t_len:].max() + l_series.iloc[-t_len:].min()) / 2)
+        kijun = float((h_series.iloc[-k_len:].max() + l_series.iloc[-k_len:].min()) / 2)
+        span_a = (tenkan + kijun) / 2
+        span_b = float((h_series.iloc[-b_len:].max() + l_series.iloc[-b_len:].min()) / 2)
+
+        kumo_top = max(span_a, span_b)
+        kumo_bot = min(span_a, span_b)
+
+        if cur_price > kumo_top:
+            ichi_pos = "Nằm TRÊN Mây Kumo ☁️ (Uptrend mạnh)"
+        elif cur_price < kumo_bot:
+            ichi_pos = "Nằm DƯỚI Mây Kumo 🔻 (Downtrend / Áp lực cản)"
+        else:
+            ichi_pos = "Nằm TRONG Mây Kumo ⏸️ (Vùng tích lũy giằng co)"
+
+        tk_signal = "⚡ Tenkan cắt trên Kijun (Golden Cross - Tín hiệu MUA)" if tenkan >= kijun else "🔻 Tenkan nằm dưới Kijun"
+        kumo_type = "Mây Xanh (Tăng)" if span_a >= span_b else "Mây Đỏ (Giảm)"
 
         info = t_obj.info or {}
         company_name = info.get("shortName") or info.get("longName") or clean_ticker
@@ -437,34 +464,45 @@ def _process_analyze(chat_id: int, ticker: str):
         except Exception:
             pass
 
-        # Đưa ra khuyến nghị
-        if cur_price > ema10 and vol_ratio >= 1.5 and pct > 0:
-            rec = "🔥 *MUA (BUY)* - Dòng tiền xác nhận bùng nổ, giá vượt EMA10."
+        # Đưa ra khuyến nghị hành động kết hợp Dòng tiền + Ichimoku + Quản trị rủi ro
+        if cur_price > kumo_top and tenkan >= kijun and vol_ratio >= 1.3 and pct > 0:
+            rec = "🔥 *MUA MẠNH (STRONG BUY)* - Dòng tiền cá mập bùng nổ + Chuẩn Ichimoku (Trên Mây Kumo & TK Golden Cross)!"
             sl = round(cur_price * 0.95, 0)
             tp = round(cur_price * 1.15, 0)
-        elif cur_price > ema10:
-            rec = "📈 *THEO DÕI MUA (ACCUMULATE)* - Xu hướng tích cực, chờ điểm mua tối ưu."
+        elif cur_price > kumo_top:
+            rec = "📈 *THEO DÕI MUA (ACCUMULATE)* - Nằm trên mây Kumo, canh mua ở các nhịp kiểm tra Kijun-sen."
             sl = round(cur_price * 0.95, 0)
             tp = round(cur_price * 1.12, 0)
+        elif cur_price < kumo_bot:
+            rec = "⚠️ *THẬN TRỌNG (BEARISH/AVOID)* - Giá nằm dưới mây Kumo, kháng cự mây dày đặc phía trên."
+            sl = round(cur_price * 0.95, 0)
+            tp = round(cur_price * 1.08, 0)
         else:
-            rec = "⏸️ *QUAN SÁT (NEUTRAL/HOLD)* - Giá đang tích lũy dưới cản ngắn hạn."
+            rec = "⏸️ *QUAN SÁT (NEUTRAL/HOLD)* - Giá tích lũy trong mây Kumo, chờ tín hiệu bứt phá (Breakout)."
             sl = round(cur_price * 0.95, 0)
             tp = round(cur_price * 1.10, 0)
 
         msg = (
-            f"📊 *PHÂN TÍCH NHANH: {clean_ticker} - {company_name}*\n"
+            f"📊 *PHÂN TÍCH TOÀN DIỆN: {clean_ticker} - {company_name}*\n"
             f"───────────────────\n"
             f"💵 *Giá hiện tại:* `{cur_price:,.0f} VND` ({pct_sign}{pct:.2f}%)\n"
             f"📊 *Thanh khoản:* `{vol:,.0f}` cp (*{vol_ratio:.2f}x* MA20)\n"
-            f"📈 *Định giá:* P/E = `{pe_str}` | P/B = `{pb_str}`\n"
-            f"📉 *Xu hướng:* {trend}\n"
+            f"📈 *Định giá Cơ bản:* P/E = `{pe_str}` | P/B = `{pb_str}`\n"
+            f"📉 *Xu hướng MA:* {trend}\n"
+            f"───────────────────\n"
+            f"☁️ *HỆ THỐNG ICHIMOKU KINKO HYO:*\n"
+            f"• *Tenkan-sen (9):* `{tenkan:,.0f} VND` | *Kijun-sen (26):* `{kijun:,.0f} VND`\n"
+            f"• *Mây Kumo:* `{kumo_bot:,.0f} - {kumo_top:,.0f} VND` ({kumo_type})\n"
+            f"• *Vị thế Giá:* {ichi_pos}\n"
+            f"• *Tín hiệu TK:* {tk_signal}\n"
             f"{news_snippet}\n"
             f"───────────────────\n"
-            f"🎯 *KHUYẾN NGHỊ:* {rec}\n"
+            f"🎯 *KHUYẾN NGHỊ HÀNH ĐỘNG:* {rec}\n"
             f"• Vùng mua gom: `{cur_price:,.0f} VND`\n"
-            f"• Cắt lỗ (Stoploss): `{sl:,.0f} VND` (-5%)\n"
-            f"• Chốt lời (Target): `{tp:,.0f} VND` (+10% đến +15%)\n"
-            f"• Lưu ý: Tuân thủ chu kỳ thanh toán T+2.5 sàn Việt Nam."
+            f"• Hỗ trợ Kijun-sen: `{kijun:,.0f} VND`\n"
+            f"• Cắt lỗ kỷ luật (SL -5%): `{sl:,.0f} VND`\n"
+            f"• Chốt lời mục tiêu (TP +15%): `{tp:,.0f} VND`\n"
+            f"• Lưu ý chu kỳ: Tuân thủ quy tắc thanh toán T+2.5 sàn Việt Nam."
         )
         send_chunked_message(chat_id, msg, reply_markup=get_main_keyboard())
 
