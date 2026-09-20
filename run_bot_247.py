@@ -71,7 +71,7 @@ def start_telegram_thread() -> threading.Thread:
             pass
         while not STOP_FLAG.is_set():
             try:
-                bot.infinity_polling(timeout=20, long_polling_timeout=15)
+                bot.polling(non_stop=True, interval=1, timeout=10)
             except Exception as e:
                 logger.error(f"[Luồng 1] Telegram polling gặp lỗi: {e}. Thử kết nối lại sau 5 giây...")
                 time.sleep(5)

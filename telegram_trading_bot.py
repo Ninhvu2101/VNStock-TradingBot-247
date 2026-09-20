@@ -482,7 +482,7 @@ def run_telegram_polling():
 
     while True:
         try:
-            bot.infinity_polling(timeout=20, long_polling_timeout=15)
+            bot.polling(non_stop=True, interval=1, timeout=10)
         except Exception as e:
             logger.error(f"Mất kết nối Telegram Polling, tự động kết nối lại sau 5s: {e}")
             time.sleep(5)

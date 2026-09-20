@@ -1,0 +1,3 @@
+﻿Thời Gian,Mã CP,Lệnh,Khối Lượng,Giá Khớp (VND),Tổng Giá Trị (VND),Lãi/Lỗ (VND),% Lãi/Lỗ,Danh Mục,Lý Do Thực Hiện
+19/09/2026 23:22:17,HPG,MUA,1000,28500,28542750.0,0,0,Ngắn hạn,Test Mua thử nghiệm đồng bộ Google Sheet
+19/09/2026 23:23:46,HPG,MUA,1000,28500,28542750,0,0,Ngắn hạn,Test Auto-Trading Mua thử nghiệm đồng bộ Google Sheets

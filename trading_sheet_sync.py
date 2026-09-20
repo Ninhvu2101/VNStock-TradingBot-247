@@ -128,7 +128,7 @@ class TradingSheetSync:
                     "rows": rows,
                     "secret": self.secret_key
                 }
-                res = requests.post(self.webapp_url, json=payload, timeout=15)
+                res = requests.post(self.webapp_url, json=payload, timeout=30)
                 if res.status_code == 200:
                     logger.info(f"Đã đồng bộ {len(rows)} vị thế lên Google Sheet [Trading_Portfolio]")
                     return True
@@ -175,7 +175,7 @@ class TradingSheetSync:
                     "row": row,
                     "secret": self.secret_key
                 }
-                res = requests.post(self.webapp_url, json=payload, timeout=15)
+                res = requests.post(self.webapp_url, json=payload, timeout=30)
                 if res.status_code == 200:
                     logger.info(f"Đã ghi lệnh {order_data.get('action')} {order_data.get('ticker')} lên Google Sheet [Trading_Orders]")
                     return True
@@ -212,7 +212,7 @@ class TradingSheetSync:
                     "rows": rows,
                     "secret": self.secret_key
                 }
-                res = requests.post(self.webapp_url, json=payload, timeout=15)
+                res = requests.post(self.webapp_url, json=payload, timeout=30)
                 if res.status_code == 200:
                     logger.info(f"Đã đồng bộ {len(rows)} mã bùng nổ lên Google Sheet [Smart_Money_Alerts]")
                     return True
