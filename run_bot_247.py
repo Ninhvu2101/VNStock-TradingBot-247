@@ -123,7 +123,7 @@ def main():
 
     print("=" * 65)
     print("   🤖 MYAGENT AUTO-TRADING 24/7 - CHỨNG KHOÁN VIỆT NAM 🇻🇳")
-    print("   Telegram Bot : @NinhVNStock_bot")
+    print("   Telegram Bot : @NinhntBotTrading_bot")
     print("   AI Engine    : Multi-Agent x Google Gemini 3.5 Flash")
     print("   Khởi động lúc: " + datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
     print("=" * 65)

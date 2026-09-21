@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-TELEGRAM TRADING BOT 24/7 - CHỨNG KHOÁN VIỆT NAM (@NinhVNStock_bot)
+TELEGRAM TRADING BOT 24/7 - CHỨNG KHOÁN VIỆT NAM (@NinhntBotTrading_bot)
 Tích hợp:
 1. Quét dòng tiền lớn (Smart Money Scanner) real-time trong phiên.
 2. Tự động quản lý danh mục Đầu tư Ngắn hạn (Lướt sóng T+) và Dài hạn (Tích sản).
@@ -49,7 +49,7 @@ from smart_money_scanner import scan_smart_money, format_scan_report
 from portfolio_manager import PortfolioManager
 
 # Cấu hình Token & Chat ID
-BOT_TOKEN = os.getenv("TELEGRAM_TRADING_BOT_TOKEN", "8751866432:AAGYb-FoT9-bo43xm-WcwmFODWA1VvCKbpk")
+BOT_TOKEN = os.getenv("TELEGRAM_TRADING_BOT_TOKEN", "8780163254:AAHRGGk4LukXGPROXYIDIJmXWhYIHqKWzOE")
 DEFAULT_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "6383178389")
 
 import json
