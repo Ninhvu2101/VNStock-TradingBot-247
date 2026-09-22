@@ -44,7 +44,7 @@ if TA_DIR not in sys.path:
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
-from telegram_trading_bot import bot, run_telegram_polling, broadcast_message, portfolio
+from telegram_trading_bot import bot, run_telegram_polling, broadcast_message, portfolio, get_main_keyboard
 from trading_scheduler import run_scheduler_loop
 
 # Cờ dừng hệ thống
@@ -66,7 +66,7 @@ def start_telegram_thread() -> threading.Thread:
     def _worker():
         logger.info("[Luồng 1] Telegram Bot polling khởi động...")
         try:
-            bot.delete_webhook(drop_pending_updates=True)
+            bot.delete_webhook(drop_pending_updates=False)
         except Exception:
             pass
         while not STOP_FLAG.is_set():
@@ -143,7 +143,7 @@ def main():
             "• Chiến lược phiên mai: *20:00*\n\n"
             "👉 Gõ `/help` hoặc bấm các nút menu bên dưới để ra lệnh!"
         )
-        broadcast_message(startup_msg)
+        broadcast_message(startup_msg, reply_markup=get_main_keyboard())
         logger.info("Đã gửi thông báo khởi động tới Telegram.")
     except Exception as e:
         logger.warning(f"Chưa thể gửi thông báo khởi động qua Telegram: {e}")
