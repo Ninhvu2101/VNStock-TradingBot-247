@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: vnstock-trading-bot-247
+    runtime: python
+    region: singapore
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python run_bot_247.py
+    envVars:
+      - key: TELEGRAM_TRADING_BOT_TOKEN
+        value: 8456004015:AAESODZZNeVs5E6YjpEEivb5DQHTiYek_9g
+      - key: TELEGRAM_CHAT_ID
+        value: "6383178389"
+      - key: TRADING_SPREADSHEET_ID
+        value: 1mjYsI-sXYgqAaebNXJb8BA4hwLZWxh-Cqji8p_F-dwo
+      - key: TRADING_SPREADSHEET_URL
+        value: https://docs.google.com/spreadsheets/d/1mjYsI-sXYgqAaebNXJb8BA4hwLZWxh-Cqji8p_F-dwo/edit
+      - key: TRADING_WEBAPP_URL
+        value: https://script.google.com/macros/s/AKfycbzn3-see6XMvflP9IIv-tXRw6moa5ZaZHZdjMwwl_FpbkHbXlEVLLFZrqhRA2xlGqfy/exec
+      - key: GEMINI_API_KEY
+        sync: false

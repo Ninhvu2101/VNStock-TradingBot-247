@@ -97,6 +97,46 @@ def start_scheduler_thread() -> threading.Thread:
     return t
 
 
+from http.server import HTTPServer, BaseHTTPRequestHandler
+
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/html; charset=utf-8")
+        self.end_headers()
+        html = """
+        <html>
+        <head><title>VNStock Trading Bot 24/7</title></head>
+        <body style="font-family: Arial, sans-serif; background: #0f172a; color: #f8fafc; padding: 40px; text-align: center;">
+            <h1>🤖 VNStock Trading Bot 24/7</h1>
+            <p style="color: #4ade80; font-size: 1.2rem; font-weight: bold;">● Hệ Thống Đang Vận Hành 24/7 Trên Cloud</p>
+            <p>Telegram Bot: <b>@NinhstockTrading_bot</b></p>
+            <p>Google Sheet: <a style="color: #38bdf8;" href="https://docs.google.com/spreadsheets/d/1mjYsI-sXYgqAaebNXJb8BA4hwLZWxh-Cqji8p_F-dwo/edit" target="_blank">Xem Bảng Tính Danh Mục</a></p>
+        </body>
+        </html>
+        """
+        self.wfile.write(html.encode("utf-8"))
+
+    def log_message(self, format, *args):
+        pass  # Tắt log spam HTTP request
+
+def start_health_server():
+    """Khởi động máy chủ Web nhẹ để đáp ứng tiêu chuẩn Render Free Web Service (cổng PORT)."""
+    port = int(os.environ.get("PORT", 10000))
+    if "PORT" in os.environ or "RENDER" in os.environ:
+        def _run():
+            try:
+                server = HTTPServer(("0.0.0.0", port), HealthHandler)
+                logger.info(f"[Web Service] Health check server đang chạy trên cổng {port}...")
+                server.serve_forever()
+            except Exception as e:
+                logger.warning(f"Không thể khởi động web health server: {e}")
+        t = threading.Thread(target=_run, name="HealthServerThread", daemon=True)
+        t.start()
+        return t
+    return None
+
+
 import socket
 
 SINGLETON_LOCK_SOCKET = None
@@ -148,7 +188,8 @@ def main():
     except Exception as e:
         logger.warning(f"Chưa thể gửi thông báo khởi động qua Telegram: {e}")
 
-    # Khởi chạy 2 luồng công việc chính
+    # Khởi chạy các luồng công việc chính
+    start_health_server()
     t_tele = start_telegram_thread()
     t_sched = start_scheduler_thread()
 
