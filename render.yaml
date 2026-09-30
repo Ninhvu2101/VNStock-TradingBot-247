@@ -17,3 +17,5 @@ services:
         value: https://docs.google.com/spreadsheets/d/1mjYsI-sXYgqAaebNXJb8BA4hwLZWxh-Cqji8p_F-dwo/edit
       - key: TRADING_WEBAPP_URL
         value: https://script.google.com/macros/s/AKfycbzn3-see6XMvflP9IIv-tXRw6moa5ZaZHZdjMwwl_FpbkHbXlEVLLFZrqhRA2xlGqfy/exec
+      - key: RENDER_EXTERNAL_URL
+        value: https://vnstock-trading-bot-247.onrender.com
