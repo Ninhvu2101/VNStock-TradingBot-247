@@ -19,3 +19,5 @@ services:
         value: https://script.google.com/macros/s/AKfycbzn3-see6XMvflP9IIv-tXRw6moa5ZaZHZdjMwwl_FpbkHbXlEVLLFZrqhRA2xlGqfy/exec
       - key: RENDER_EXTERNAL_URL
         value: https://vnstock-trading-bot-247.onrender.com
+      - key: IS_CLOUD
+        value: "true"
