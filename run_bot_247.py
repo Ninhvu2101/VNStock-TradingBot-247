@@ -65,7 +65,7 @@ import json
 import socketserver
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
-IS_CLOUD = "RENDER" in os.environ or "PORT" in os.environ
+IS_CLOUD = sys.platform != "win32" or os.environ.get("IS_CLOUD", "").lower() in ("true", "1") or "RENDER" in os.environ or "PORT" in os.environ
 RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL", "https://vnstock-trading-bot-247.onrender.com").rstrip("/")
 
 
