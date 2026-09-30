@@ -96,25 +96,27 @@ class WebhookAndHealthHandler(BaseHTTPRequestHandler):
         if self.path.startswith("/webhook"):
             try:
                 content_length = int(self.headers.get("Content-Length", 0))
-                body = self.rfile.read(content_length).decode("utf-8")
+                body = self.rfile.read(content_length).decode("utf-8") if content_length > 0 else ""
 
-                # Trả về HTTP 200 ngay lập tức cho Telegram (< 50ms)
+                if body:
+                    try:
+                        update_dict = json.loads(body)
+                        update = telebot.types.Update.de_json(update_dict)
+                        if update:
+                            threading.Thread(target=bot.process_new_updates, args=([update],), daemon=True).start()
+                    except Exception as parse_err:
+                        logger.warning(f"[Webhook] Lỗi parse payload: {parse_err}")
+
                 self.send_response(200)
                 self.send_header("Content-type", "text/plain; charset=utf-8")
                 self.end_headers()
                 self.wfile.write(b"OK")
-
-                # Xử lý cập nhật trong luồng nền
-                if body:
-                    update_dict = json.loads(body)
-                    update = telebot.types.Update.de_json(update_dict)
-                    if update:
-                        threading.Thread(target=bot.process_new_updates, args=([update],), daemon=True).start()
             except Exception as e:
-                logger.error(f"[Webhook Error] Lỗi xử lý Telegram update: {e}")
+                logger.error(f"[Webhook Error] {e}")
                 try:
                     self.send_response(200)
                     self.end_headers()
+                    self.wfile.write(b"OK")
                 except Exception:
                     pass
         else:
