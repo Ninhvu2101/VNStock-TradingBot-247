@@ -61,20 +61,124 @@ def handle_exit(signum, frame):
     sys.exit(0)
 
 
-def start_telegram_thread() -> threading.Thread:
-    """Khởi chạy luồng Telegram Bot với cơ chế tự phục hồi."""
-    def _worker():
-        logger.info("[Luồng 1] Telegram Bot polling khởi động...")
-        try:
-            bot.delete_webhook(drop_pending_updates=False)
-        except Exception:
-            pass
-        while not STOP_FLAG.is_set():
+import json
+import socketserver
+from http.server import HTTPServer, BaseHTTPRequestHandler
+
+IS_CLOUD = "RENDER" in os.environ or "PORT" in os.environ
+RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL", "https://vnstock-trading-bot-247.onrender.com").rstrip("/")
+
+
+class ThreadedHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
+    daemon_threads = True
+
+
+class WebhookAndHealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/html; charset=utf-8")
+        self.end_headers()
+        html = """
+        <html>
+        <head><title>VNStock Trading Bot 24/7</title></head>
+        <body style="font-family: Arial, sans-serif; background: #0f172a; color: #f8fafc; padding: 40px; text-align: center;">
+            <h1>🤖 VNStock Trading Bot 24/7</h1>
+            <p style="color: #4ade80; font-size: 1.2rem; font-weight: bold;">● Hệ Thống Đang Vận Hành 24/7 Trên Cloud (Webhook Live)</p>
+            <p>Telegram Bot: <b>@NinhstockTrading_bot</b></p>
+            <p>Google Sheet: <a style="color: #38bdf8;" href="https://docs.google.com/spreadsheets/d/1mjYsI-sXYgqAaebNXJb8BA4hwLZWxh-Cqji8p_F-dwo/edit" target="_blank">Xem Bảng Tính Danh Mục</a></p>
+        </body>
+        </html>
+        """
+        self.wfile.write(html.encode("utf-8"))
+
+    def do_POST(self):
+        """Tiếp nhận Webhook Update từ Telegram gửi về."""
+        if self.path.startswith("/webhook"):
             try:
-                bot.polling(non_stop=True, interval=1, timeout=10)
+                content_length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(content_length).decode("utf-8")
+
+                # Trả về HTTP 200 ngay lập tức cho Telegram (< 50ms)
+                self.send_response(200)
+                self.send_header("Content-type", "text/plain; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(b"OK")
+
+                # Xử lý cập nhật trong luồng nền
+                if body:
+                    update_dict = json.loads(body)
+                    update = telebot.types.Update.de_json(update_dict)
+                    if update:
+                        threading.Thread(target=bot.process_new_updates, args=([update],), daemon=True).start()
             except Exception as e:
-                logger.error(f"[Luồng 1] Telegram polling gặp lỗi: {e}. Thử kết nối lại sau 5 giây...")
-                time.sleep(5)
+                logger.error(f"[Webhook Error] Lỗi xử lý Telegram update: {e}")
+                try:
+                    self.send_response(200)
+                    self.end_headers()
+                except Exception:
+                    pass
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def log_message(self, format, *args):
+        pass  # Tắt log spam HTTP request
+
+
+def start_health_server():
+    """Khởi động máy chủ Web đa luồng phục vụ Webhook và Health Check trên Render."""
+    port = int(os.environ.get("PORT", 10000))
+    if IS_CLOUD:
+        def _run():
+            try:
+                server = ThreadedHTTPServer(("0.0.0.0", port), WebhookAndHealthHandler)
+                logger.info(f"[Web Service] Webhook & Health server đang chạy trên cổng {port}...")
+                server.serve_forever()
+            except Exception as e:
+                logger.warning(f"Không thể khởi động web health server: {e}")
+        t = threading.Thread(target=_run, name="HealthServerThread", daemon=True)
+        t.start()
+        return t
+    return None
+
+
+def start_telegram_thread() -> threading.Thread:
+    """Khởi chạy Telegram: Webhook nếu trên Cloud (Render), Polling nếu trên Local PC."""
+    def _worker():
+        if IS_CLOUD:
+            webhook_url = f"{RENDER_URL}/webhook"
+            logger.info(f"[Luồng 1] Chế độ CLOUD phát hiện. Thiết lập Webhook: {webhook_url}")
+            try:
+                bot.set_webhook(url=webhook_url, drop_pending_updates=False)
+                logger.info(f"[Luồng 1] ✅ Telegram Webhook kích hoạt thành công!")
+            except Exception as e:
+                logger.error(f"[Luồng 1] ❌ Lỗi kích hoạt Webhook: {e}")
+
+            # Luồng Cloud chỉ cần duy trì kiểm tra định kỳ Webhook
+            while not STOP_FLAG.is_set():
+                time.sleep(300)
+                try:
+                    info = bot.get_webhook_info()
+                    if not info.url:
+                        bot.set_webhook(url=webhook_url, drop_pending_updates=False)
+                except Exception:
+                    pass
+        else:
+            logger.info("[Luồng 1] Chế độ LOCAL phát hiện. Telegram Bot polling khởi động...")
+            while not STOP_FLAG.is_set():
+                try:
+                    try:
+                        bot._TeleBot__stop_polling.clear()
+                    except Exception:
+                        pass
+                    try:
+                        bot.delete_webhook(drop_pending_updates=True)
+                    except Exception:
+                        pass
+                    bot.infinity_polling(timeout=10, long_polling_timeout=5, logger_level=logging.ERROR)
+                except Exception as e:
+                    logger.error(f"[Luồng 1] Telegram polling gặp lỗi: {e}. Thử kết nối lại sau 5 giây...")
+                    time.sleep(5)
 
     t = threading.Thread(target=_worker, name="TelegramPollingThread", daemon=True)
     t.start()
@@ -95,46 +199,6 @@ def start_scheduler_thread() -> threading.Thread:
     t = threading.Thread(target=_worker, name="SchedulerThread", daemon=True)
     t.start()
     return t
-
-
-from http.server import HTTPServer, BaseHTTPRequestHandler
-
-class HealthHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header("Content-type", "text/html; charset=utf-8")
-        self.end_headers()
-        html = """
-        <html>
-        <head><title>VNStock Trading Bot 24/7</title></head>
-        <body style="font-family: Arial, sans-serif; background: #0f172a; color: #f8fafc; padding: 40px; text-align: center;">
-            <h1>🤖 VNStock Trading Bot 24/7</h1>
-            <p style="color: #4ade80; font-size: 1.2rem; font-weight: bold;">● Hệ Thống Đang Vận Hành 24/7 Trên Cloud</p>
-            <p>Telegram Bot: <b>@NinhstockTrading_bot</b></p>
-            <p>Google Sheet: <a style="color: #38bdf8;" href="https://docs.google.com/spreadsheets/d/1mjYsI-sXYgqAaebNXJb8BA4hwLZWxh-Cqji8p_F-dwo/edit" target="_blank">Xem Bảng Tính Danh Mục</a></p>
-        </body>
-        </html>
-        """
-        self.wfile.write(html.encode("utf-8"))
-
-    def log_message(self, format, *args):
-        pass  # Tắt log spam HTTP request
-
-def start_health_server():
-    """Khởi động máy chủ Web nhẹ để đáp ứng tiêu chuẩn Render Free Web Service (cổng PORT)."""
-    port = int(os.environ.get("PORT", 10000))
-    if "PORT" in os.environ or "RENDER" in os.environ:
-        def _run():
-            try:
-                server = HTTPServer(("0.0.0.0", port), HealthHandler)
-                logger.info(f"[Web Service] Health check server đang chạy trên cổng {port}...")
-                server.serve_forever()
-            except Exception as e:
-                logger.warning(f"Không thể khởi động web health server: {e}")
-        t = threading.Thread(target=_run, name="HealthServerThread", daemon=True)
-        t.start()
-        return t
-    return None
 
 
 import socket
