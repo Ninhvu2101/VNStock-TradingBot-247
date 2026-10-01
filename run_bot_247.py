@@ -75,6 +75,19 @@ class ThreadedHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
 
 class WebhookAndHealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
+        if self.path.startswith("/api/debug"):
+            self.send_response(200)
+            self.send_header("Content-type", "application/json")
+            self.end_headers()
+            debug_info = {
+                "platform": sys.platform,
+                "is_cloud": IS_CLOUD,
+                "threads": [t.name for t in threading.enumerate()],
+                "time": datetime.now().isoformat()
+            }
+            self.wfile.write(json.dumps(debug_info).encode("utf-8"))
+            return
+
         self.send_response(200)
         self.send_header("Content-type", "text/html; charset=utf-8")
         self.end_headers()
