@@ -158,42 +158,26 @@ def start_health_server():
 
 
 def start_telegram_thread() -> threading.Thread:
-    """Khởi chạy Telegram: Webhook nếu trên Cloud (Render), Polling nếu trên Local PC."""
+    """Khởi chạy Telegram Bot Polling 24/7 với cơ chế tự phục hồi."""
     def _worker():
-        if IS_CLOUD:
-            webhook_url = f"{RENDER_URL}/webhook"
-            logger.info(f"[Luồng 1] Chế độ CLOUD phát hiện. Thiết lập Webhook: {webhook_url}")
-            try:
-                bot.set_webhook(url=webhook_url, drop_pending_updates=False)
-                logger.info(f"[Luồng 1] ✅ Telegram Webhook kích hoạt thành công!")
-            except Exception as e:
-                logger.error(f"[Luồng 1] ❌ Lỗi kích hoạt Webhook: {e}")
+        logger.info("[Luồng 1] Khởi động Telegram Bot Polling 24/7...")
+        # Đảm bảo xóa sạch Webhook cũ để Polling nhận 100% tin nhắn
+        try:
+            bot.delete_webhook(drop_pending_updates=True)
+            logger.info("[Luồng 1] Đã dọn dẹp Webhook cũ, sẵn sàng Polling trực tiếp từ Telegram.")
+        except Exception as e:
+            logger.warning(f"[Luồng 1] Xóa webhook: {e}")
 
-            # Luồng Cloud chỉ cần duy trì kiểm tra định kỳ Webhook
-            while not STOP_FLAG.is_set():
-                time.sleep(300)
+        while not STOP_FLAG.is_set():
+            try:
                 try:
-                    info = bot.get_webhook_info()
-                    if not info.url:
-                        bot.set_webhook(url=webhook_url, drop_pending_updates=False)
+                    bot._TeleBot__stop_polling.clear()
                 except Exception:
                     pass
-        else:
-            logger.info("[Luồng 1] Chế độ LOCAL phát hiện. Telegram Bot polling khởi động...")
-            while not STOP_FLAG.is_set():
-                try:
-                    try:
-                        bot._TeleBot__stop_polling.clear()
-                    except Exception:
-                        pass
-                    try:
-                        bot.delete_webhook(drop_pending_updates=True)
-                    except Exception:
-                        pass
-                    bot.infinity_polling(timeout=10, long_polling_timeout=5, logger_level=logging.ERROR)
-                except Exception as e:
-                    logger.error(f"[Luồng 1] Telegram polling gặp lỗi: {e}. Thử kết nối lại sau 5 giây...")
-                    time.sleep(5)
+                bot.infinity_polling(timeout=10, long_polling_timeout=5, logger_level=logging.ERROR)
+            except Exception as e:
+                logger.error(f"[Luồng 1] Telegram polling gặp lỗi: {e}. Thử kết nối lại sau 5 giây...")
+                time.sleep(5)
 
     t = threading.Thread(target=_worker, name="TelegramPollingThread", daemon=True)
     t.start()
@@ -237,6 +221,24 @@ def acquire_singleton_lock(port: int = 58999):
 def main():
     signal.signal(signal.SIGINT, handle_exit)
     signal.signal(signal.SIGTERM, handle_exit)
+
+    if not IS_CLOUD and "--force-local" not in sys.argv:
+        try:
+            import requests
+            r = requests.get("https://vnstock-trading-bot-247.onrender.com", timeout=3)
+            if r.status_code == 200:
+                print("\n" + "=" * 65)
+                print("   🤖 MYAGENT AUTO-TRADING 24/7 - CHỨNG KHOÁN VIỆT NAM 🇻🇳")
+                print("   Telegram Bot : @NinhstockTrading_bot")
+                print("=" * 65)
+                print("   ✅ CLOUD RENDER ĐANG VẬN HÀNH BOT 24/7 TRÊN MẠNG!")
+                print("   Bạn KHÔNG CẦN bật chương trình này trên PC.")
+                print("   Bạn có thể TẮT MÁY TÍNH HOÀN TOÀN, bot vẫn trả lời 24/7 trên Telegram.")
+                print("   (Nếu muốn chạy trên PC để debug thử nghiệm, gõ: python run_bot_247.py --force-local)")
+                print("=" * 65 + "\n")
+                sys.exit(0)
+        except Exception:
+            pass
 
     acquire_singleton_lock()
 
