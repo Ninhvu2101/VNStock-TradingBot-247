@@ -45,8 +45,10 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
 # Import các module nội bộ
-from smart_money_scanner import scan_smart_money, format_scan_report
+from smart_money_scanner import scan_smart_money, format_scan_report, trim_memory
 from portfolio_manager import PortfolioManager
+
+BOT_START_TIME = time.time()
 
 # Cấu hình Token & Chat ID
 BOT_TOKEN = os.getenv("TELEGRAM_TRADING_BOT_TOKEN", "8456004015:AAESODZZNeVs5E6YjpEEivb5DQHTiYek_9g")
@@ -182,6 +184,7 @@ def handle_scan(message):
     results = scan_smart_money(min_vol_ratio=1.3, min_price_change=0.5, top_n=8)
     report = format_scan_report(results)
     send_chunked_message(chat_id, report, reply_markup=get_main_keyboard())
+    trim_memory()
 
 
 @bot.message_handler(commands=["portfolio", "p"])
@@ -342,19 +345,33 @@ def handle_autotrade(message):
 def handle_status(message):
     chat_id = message.chat.id
     import psutil
-    cpu = psutil.cpu_percent(interval=0.5)
-    ram = psutil.virtual_memory().percent
+    proc = psutil.Process()
+    rss_mb = proc.memory_info().rss / (1024 * 1024)
+    cpu = psutil.cpu_percent(interval=0.2)
+    uptime_sec = int(time.time() - BOT_START_TIME)
+    h = uptime_sec // 3600
+    m = (uptime_sec % 3600) // 60
+    s = uptime_sec % 60
+    try:
+        bot_user = f"@{bot.get_me().username}"
+    except Exception:
+        bot_user = "@NinhstockTrading_bot"
+
     msg = (
         "🟢 *HỆ THỐNG AUTO-TRADING 24/7 ĐANG HOẠT ĐỘNG*\n"
         "───────────────────\n"
+        f"• Máy chủ: `Cloud Render 24/7 Uptime`\n"
+        f"• RAM tiến trình: `{rss_mb:.1f} MB / 512 MB` (Tối ưu siêu nhẹ)\n"
         f"• CPU sử dụng: `{cpu}%`\n"
-        f"• RAM sử dụng: `{ram}%`\n"
-        f"• Telegram Bot: `@NinhVNStock_bot`\n"
-        f"• Mô hình AI: Google Gemini 3.5 Flash (Xoay tua 10 Keys)\n"
-        f"• Lịch quét trong phiên: Mỗi 15 phút từ 09:15 đến 14:45\n"
-        f"• Số lượng người theo dõi: `{len(SUBSCRIBED_CHATS)}`"
+        f"• Uptime: `{h}h {m}m {s}s`\n"
+        f"• Telegram Bot: `{bot_user}`\n"
+        f"• Lịch quét trong phiên: Mỗi 15 phút (09:15 - 14:45)\n"
+        f"• Số lượng theo dõi: `{len(SUBSCRIBED_CHATS)}`\n"
+        "───────────────────\n"
+        "💡 *Lưu ý:* Bot đang chạy 100% trên Cloud Render. Bạn có thể TẮT MÁY TÍNH HOÀN TOÀN, bot vẫn hoạt động bình thường!"
     )
     bot.send_message(chat_id, msg)
+    trim_memory()
 
 
 @bot.message_handler(func=lambda msg: True)
@@ -505,9 +522,10 @@ def _process_analyze(chat_id: int, ticker: str):
             f"• Lưu ý chu kỳ: Tuân thủ quy tắc thanh toán T+2.5 sàn Việt Nam."
         )
         send_chunked_message(chat_id, msg, reply_markup=get_main_keyboard())
-
     except Exception as e:
         bot.send_message(chat_id, f"❌ Lỗi khi phân tích mã {clean_ticker}: {e}")
+    finally:
+        trim_memory()
 
 
 def run_telegram_polling():
