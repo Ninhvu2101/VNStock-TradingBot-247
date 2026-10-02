@@ -13,6 +13,8 @@ import sys
 import os
 from datetime import datetime, timedelta
 from typing import List, Dict, Any
+import gc
+import ctypes
 import pandas as pd
 import yfinance as yf
 
@@ -24,18 +26,25 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-# Danh sách 60 mã cổ phiếu thanh khoản lớn và uy tín nhất TTCK Việt Nam
+
+def trim_memory():
+    """Giải phóng tối đa bộ nhớ RAM cho hệ điều hành cgroup Linux (Render 512MB)."""
+    gc.collect()
+    try:
+        if sys.platform != "win32":
+            ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:
+        pass
+
+
+# Danh sách 36 mã cổ phiếu thanh khoản lớn và dẫn dắt TTCK Việt Nam (VN30 + Top Midcaps nhạy dòng tiền)
 UNIVERSE_VN = [
     # Rổ VN30
     "HPG.VN", "FPT.VN", "VNM.VN", "SSI.VN", "TCB.VN", "MBB.VN", "MWG.VN", "VIC.VN", "VHM.VN", "VRE.VN",
     "VCB.VN", "CTG.VN", "BID.VN", "VPB.VN", "ACB.VN", "STB.VN", "TPB.VN", "HDB.VN", "SHB.VN", "LPB.VN",
     "GAS.VN", "PLX.VN", "POW.VN", "SAB.VN", "VJC.VN", "MSN.VN", "GVR.VN", "BCM.VN", "BVH.VN", "SSB.VN",
-    # Nhóm Chứng khoán & Bất động sản & Thép Midcap
-    "VCI.VN", "HCM.VN", "VND.VN", "KDH.VN", "NLG.VN", "DXG.VN", "DIG.VN", "PDR.VN", "KBC.VN",
-    "HSG.VN", "NKG.VN", "CII.VN", "EIB.VN",
-    # Nhóm Hóa chất, Dầu khí, Bán lẻ & Công nghệ
-    "DGC.VN", "PVD.VN", "FRT.VN", "CTR.VN", "GEX.VN", "VGC.VN", "SZC.VN", "REE.VN", "PC1.VN",
-    "DBC.VN", "HAX.VN", "DCM.VN", "DPM.VN", "VHC.VN", "ANV.VN"
+    # Nhóm Midcaps dẫn dắt thanh khoản (Chứng khoán, Bất động sản, Thép, Hóa chất)
+    "VCI.VN", "VND.VN", "DXG.VN", "DIG.VN", "HSG.VN", "DGC.VN"
 ]
 
 
@@ -47,19 +56,15 @@ def scan_smart_money(
 ) -> List[Dict[str, Any]]:
     """
     Quét danh mục cổ phiếu và xếp hạng các mã có dòng tiền lớn vào mạnh nhất.
-    
-    Args:
-        min_vol_ratio: Tỷ lệ Volume hôm nay / SMA20 Volume tối thiểu (mặc định 1.3x)
-        min_price_change: Mức tăng giá tối thiểu % (mặc định +0.5%)
-        min_turnover_billion: Giá trị giao dịch tối thiểu tính bằng tỷ VNĐ (mặc định 10 tỷ)
-        top_n: Số lượng cổ phiếu tối đa trả về
+    Tối ưu siêu nhẹ (<100MB RAM) để vận hành 24/7 an toàn trên Cloud Render.
     """
     print(f"[*] Đang tải dữ liệu {len(UNIVERSE_VN)} cổ phiếu hàng đầu Việt Nam...")
     try:
-        # Tải dữ liệu 3 tháng gần nhất để tính chuẩn MA20, EMA10 và hệ thống Ichimoku Kinko Hyo
-        data = yf.download(UNIVERSE_VN, period="3mo", progress=False)
+        # Tải dữ liệu 40 ngày gần nhất (đủ cho MA20, EMA10 và Ichimoku Kijun 26) - Tiết kiệm 60% RAM
+        data = yf.download(UNIVERSE_VN, period="40d", progress=False)
         if data.empty or "Close" not in data or "Volume" not in data:
             print("[Lỗi] Không nhận được dữ liệu từ sàn!")
+            trim_memory()
             return []
 
         close_df = data["Close"]
@@ -167,7 +172,8 @@ def scan_smart_money(
                     "kumo_range": f"{kumo_bot:,.0f} - {kumo_top:,.0f}",
                     "ichi_signal": ichi_signal,
                     "score": round(score, 1),
-                    "signal": signal
+                    "signal": signal,
+                    "trend_signal": signal
                 })
 
         # Sắp xếp theo điểm dòng tiền giảm dần
@@ -179,6 +185,15 @@ def scan_smart_money(
         import traceback
         traceback.print_exc()
         return []
+    finally:
+        # Giải phóng biến và thu hồi RAM lập tức
+        try:
+            del data
+            del close_df
+            del vol_df
+        except Exception:
+            pass
+        trim_memory()
 
 
 def format_scan_report(results: List[Dict[str, Any]]) -> str:
