@@ -21,3 +21,5 @@ services:
         value: https://vnstock-trading-bot-247.onrender.com
       - key: IS_CLOUD
         value: "true"
+      - key: MALLOC_ARENA_MAX
+        value: "2"
