@@ -40,7 +40,7 @@ TA_DIR = os.path.join(BASE_DIR, "TradingAgents")
 if TA_DIR not in sys.path:
     sys.path.insert(0, TA_DIR)
 
-from smart_money_scanner import scan_smart_money, UNIVERSE_VN
+from smart_money_scanner import scan_smart_money, UNIVERSE_VN, trim_memory
 from portfolio_manager import PortfolioManager
 import yfinance as yf
 
@@ -154,17 +154,19 @@ def run_session_scan_and_alert():
             )
 
             for i, item in enumerate(alert_items, 1):
+                sig_text = item.get("trend_signal") or item.get("signal") or "Dòng tiền vào tích cực"
                 msg += (
                     f"*{i}. {item['ticker']}*: `{item['price']:,.0f} VND` (*+{item['price_change_pct']:.2f}%*)\n"
                     f"   • Khối lượng: `{item['volume']:,.0f}` cp (*{item['vol_ratio']:.2f}x* MA20)\n"
                     f"   • Giá trị: `{item['turnover_billion']:,.1f} tỷ VND`\n"
-                    f"   • Tín hiệu: *{item['trend_signal']}*\n"
+                    f"   • Tín hiệu: *{sig_text}*\n"
                     f"   👉 *Lệnh nhanh:* `/buy {item['ticker']} 1000 ngan` | Gõ `{item['ticker']}` xem AI\n\n"
                 )
 
             msg += "───────────────────\n💡 *Khuyến nghị:* Mua đón sóng dòng tiền, tuân thủ T+2.5 và SL -5%."
             broadcast_message(msg)
             logger.info(f"Đã phát cảnh báo dòng tiền cho {len(alert_items)} mã: {[x['ticker'] for x in alert_items]}")
+            trim_memory()
 
         # Đồng bộ lịch sử quét bùng nổ dòng tiền lên Google Sheets
         try:
@@ -248,8 +250,10 @@ def run_session_scan_and_alert():
                 for alert in sl_tp_alerts:
                     broadcast_message(alert["message"])
                     logger.info(f"Kích hoạt SL/TP: {alert['message']}")
+                trim_memory()
             except Exception as e:
                 logger.error(f"Lỗi kiểm tra SL/TP danh mục: {e}")
+                trim_memory()
 
     except Exception as e:
         logger.error(f"Lỗi trong chu kỳ quét phiên: {e}", exc_info=True)
@@ -308,6 +312,7 @@ def check_and_run_evening_strategy():
                 best_stock = top_stocks[0]
                 ticker = best_stock["ticker"]
 
+                sig_text = best_stock.get("trend_signal") or best_stock.get("signal") or "Dòng tiền cá mập bùng nổ"
                 strategy_msg = (
                     f"🌙 *[BẢN TIN CHIẾN LƯỢC TỐI & KẾ HOẠCH PHIÊN MAI]* 🌙\n"
                     f"📅 *Ngày chuẩn bị:* `{now.strftime('%d/%m/%Y')}`\n"
@@ -316,7 +321,7 @@ def check_and_run_evening_strategy():
                     f"• Giá đóng cửa: `{best_stock['price']:,.0f} VND` (+{best_stock['price_change_pct']:.2f}%)\n"
                     f"• Khối lượng bùng nổ: `{best_stock['vol_ratio']:.2f}x` bình quân 20 phiên\n"
                     f"• Giá trị dòng tiền lớn: `{best_stock['turnover_billion']:,.1f} tỷ VND`\n"
-                    f"• Tín hiệu kỹ thuật: *{best_stock['trend_signal']}*\n"
+                    f"• Tín hiệu kỹ thuật: *{sig_text}*\n"
                     f"───────────────────\n"
                     f"🎯 *Kế hoạch giải ngân phiên mai:*\n"
                     f"• Vùng giá canh mua: `{best_stock['price'] * 0.99:,.0f} - {best_stock['price'] * 1.01:,.0f} VND`\n"
@@ -328,6 +333,7 @@ def check_and_run_evening_strategy():
                 broadcast_message(strategy_msg)
                 LAST_EVENING_SENT_DATE = today_str
                 logger.info(f"Đã gửi thành công chiến lược tối cho mã {ticker}.")
+                trim_memory()
         except Exception as e:
             logger.error(f"Lỗi tạo chiến lược tối: {e}")
 
