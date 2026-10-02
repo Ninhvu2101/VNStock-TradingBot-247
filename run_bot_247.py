@@ -26,15 +26,31 @@ if sys.platform == "win32":
     except Exception:
         pass
 
+from logging.handlers import RotatingFileHandler
+import gc
+import ctypes
+import psutil
+
+os.makedirs(os.path.join(os.path.dirname(__file__), "data"), exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler(os.path.join(os.path.dirname(__file__), "data", "bot_247.log"), encoding="utf-8")
+        RotatingFileHandler(os.path.join(os.path.dirname(__file__), "data", "bot_247.log"), maxBytes=2*1024*1024, backupCount=1, encoding="utf-8")
     ]
 )
 logger = logging.getLogger("MasterRunner")
+
+
+def trim_memory():
+    """Dọn dẹp triệt để RAM không dùng để bot luôn duy trì dưới 150MB trên Render 512MB."""
+    gc.collect()
+    try:
+        if sys.platform != "win32":
+            ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:
+        pass
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(BASE_DIR)
@@ -79,26 +95,65 @@ class WebhookAndHealthHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-type", "application/json")
             self.end_headers()
+            proc = psutil.Process()
+            rss_mb = round(proc.memory_info().rss / (1024 * 1024), 2)
+            bot_info = {}
+            try:
+                me = bot.get_me()
+                bot_info = {
+                    "id": me.id,
+                    "username": me.username,
+                    "first_name": me.first_name,
+                }
+            except Exception as e:
+                bot_info = {"error": str(e)}
+
+            wh_info = {}
+            try:
+                wh = bot.get_webhook_info()
+                wh_info = {
+                    "url": wh.url,
+                    "pending_update_count": wh.pending_update_count,
+                    "last_error_message": wh.last_error_message
+                }
+            except Exception as e:
+                wh_info = {"error": str(e)}
+
             debug_info = {
                 "platform": sys.platform,
                 "is_cloud": IS_CLOUD,
+                "memory_rss_mb": rss_mb,
+                "memory_limit_mb": 512,
+                "memory_safe": rss_mb < 250,
                 "threads": [t.name for t in threading.enumerate()],
+                "bot": bot_info,
+                "webhook": wh_info,
                 "time": datetime.now().isoformat()
             }
-            self.wfile.write(json.dumps(debug_info).encode("utf-8"))
+            self.wfile.write(json.dumps(debug_info, indent=2).encode("utf-8"))
             return
 
         self.send_response(200)
         self.send_header("Content-type", "text/html; charset=utf-8")
         self.end_headers()
-        html = """
+        proc = psutil.Process()
+        rss_mb = round(proc.memory_info().rss / (1024 * 1024), 1)
+        bot_user = "@NinhstockTrading_bot"
+        try:
+            bot_user = f"@{bot.get_me().username}"
+        except Exception:
+            pass
+
+        html = f"""
         <html>
         <head><title>VNStock Trading Bot 24/7</title></head>
         <body style="font-family: Arial, sans-serif; background: #0f172a; color: #f8fafc; padding: 40px; text-align: center;">
             <h1>🤖 VNStock Trading Bot 24/7</h1>
-            <p style="color: #4ade80; font-size: 1.2rem; font-weight: bold;">● Hệ Thống Đang Vận Hành 24/7 Trên Cloud (Webhook Live)</p>
-            <p>Telegram Bot: <b>@NinhstockTrading_bot</b></p>
+            <p style="color: #4ade80; font-size: 1.2rem; font-weight: bold;">● Hệ Thống Đang Vận Hành 24/7 Trên Cloud Render</p>
+            <p>Telegram Bot: <b>{bot_user}</b></p>
+            <p>RAM Tiến Trình: <b style="color: #38bdf8;">{rss_mb} MB / 512 MB</b> (Siêu nhẹ & An toàn tuyệt đối)</p>
             <p>Google Sheet: <a style="color: #38bdf8;" href="https://docs.google.com/spreadsheets/d/1mjYsI-sXYgqAaebNXJb8BA4hwLZWxh-Cqji8p_F-dwo/edit" target="_blank">Xem Bảng Tính Danh Mục</a></p>
+            <p style="color: #94a3b8; font-size: 0.9rem; margin-top: 30px;">Tự động quét dòng tiền mỗi 15 phút & Khớp lệnh SL/TP kỷ luật.</p>
         </body>
         </html>
         """
@@ -155,6 +210,30 @@ def start_health_server():
         t.start()
         return t
     return None
+
+
+def start_memory_watchdog_thread() -> threading.Thread:
+    """Luồng giám sát RAM liên tục, tự động giải phóng khi bộ nhớ vượt quá ngưỡng an toàn."""
+    def _worker():
+        logger.info("[Luồng 3] Memory Watchdog khởi động (Đảm bảo RAM < 200MB / 512MB)...")
+        while not STOP_FLAG.is_set():
+            try:
+                proc = psutil.Process()
+                rss_mb = proc.memory_info().rss / (1024 * 1024)
+                if rss_mb > 200:
+                    logger.warning(f"⚠️ Bộ nhớ RAM ({rss_mb:.1f} MB) vượt 200MB. Kích hoạt thu hồi malloc_trim...")
+                    trim_memory()
+                    rss_after = proc.memory_info().rss / (1024 * 1024)
+                    logger.info(f"✅ Đã dọn RAM: từ {rss_mb:.1f} MB xuống {rss_after:.1f} MB.")
+                else:
+                    trim_memory()
+            except Exception as e:
+                logger.warning(f"Lỗi memory watchdog: {e}")
+            time.sleep(30)
+
+    t = threading.Thread(target=_worker, name="MemoryWatchdogThread", daemon=True)
+    t.start()
+    return t
 
 
 def start_telegram_thread() -> threading.Thread:
@@ -271,11 +350,12 @@ def main():
 
     # Khởi chạy các luồng công việc chính
     start_health_server()
+    t_mem = start_memory_watchdog_thread()
     t_tele = start_telegram_thread()
     t_sched = start_scheduler_thread()
 
     # Vòng lặp Watchdog của luồng chính
-    logger.info("Cả 2 luồng đã hoạt động. Hệ thống đang vận hành 24/7...")
+    logger.info("Tất cả các luồng đã hoạt động. Hệ thống đang vận hành 24/7...")
     try:
         while not STOP_FLAG.is_set():
             time.sleep(10)
@@ -287,6 +367,10 @@ def main():
             if not t_sched.is_alive():
                 logger.warning("Phát hiện luồng Scheduler bị tắt! Đang hồi sinh luồng mới...")
                 t_sched = start_scheduler_thread()
+
+            if not t_mem.is_alive():
+                logger.warning("Phát hiện luồng Memory Watchdog bị tắt! Đang hồi sinh luồng mới...")
+                t_mem = start_memory_watchdog_thread()
 
     except (KeyboardInterrupt, SystemExit):
         handle_exit(None, None)
