@@ -18,8 +18,18 @@ echo ===================================================================
 echo [%date% %time%] Đang khởi động hệ thống Bot Trading 24/7...
 "%PYTHON_EXE%" "D:\MyAgent\5. bot trading\run_bot_247.py"
 
+if %ERRORLEVEL% EQU 0 (
+    echo.
+    echo ===================================================================
+    echo  [THÀNH CÔNG] Bot đã được bàn giao cho Cloud Render chạy 24/7!
+    echo  Bạn có thể yên tâm TẮT MÁY TÍNH HOÀN TOÀN, bot vẫn trả lời trên Telegram.
+    echo ===================================================================
+    pause
+    exit /b 0
+)
+
 echo.
-echo [CẢNH BÁO] Tiến trình đã dừng lại hoặc gặp lỗi.
+echo [CẢNH BÁO] Tiến trình gặp lỗi hoặc mất kết nối mạng.
 echo Hệ thống sẽ tự động khởi động lại sau 5 giây...
 timeout /t 5 /nobreak >nul
 goto LOOP
