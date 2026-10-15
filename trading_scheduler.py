@@ -15,9 +15,16 @@ Tự động lập lịch giám sát thị trường và danh mục đầu tư t
 import os
 import sys
 import time
+import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any
+
+VN_TZ = timezone(timedelta(hours=7))
+
+def get_vn_now() -> datetime:
+    """Luôn trả về thời gian chuẩn múi giờ Việt Nam (GMT+7) bất kể môi trường chạy (Cloud hay PC)."""
+    return datetime.now(timezone.utc).astimezone(VN_TZ)
 
 # Đảm bảo UTF-8 cho console
 if sys.platform == "win32":
@@ -91,20 +98,20 @@ LAST_EVENING_SENT_DATE: str = ""
 
 
 def is_trading_day() -> bool:
-    """Kiểm tra hôm nay có phải ngày giao dịch (Thứ 2 đến Thứ 6) hay không."""
-    return datetime.now().weekday() < 5
+    """Kiểm tra hôm nay có phải ngày giao dịch (Thứ 2 đến Thứ 6) theo giờ Việt Nam hay không."""
+    return get_vn_now().weekday() < 5
 
 
 def is_in_trading_session() -> bool:
     """
-    Kiểm tra hiện tại có đang trong phiên giao dịch của sàn HOSE/HNX hay không.
+    Kiểm tra hiện tại có đang trong phiên giao dịch của sàn HOSE/HNX theo GIỜ VIỆT NAM hay không.
     Phiên sáng: 09:15 - 11:30
     Phiên chiều: 13:00 - 14:45
     """
     if not is_trading_day():
         return False
 
-    now = datetime.now().time()
+    now = get_vn_now().time()
     t_0915 = datetime.strptime("09:15", "%H:%M").time()
     t_1130 = datetime.strptime("11:30", "%H:%M").time()
     t_1300 = datetime.strptime("13:00", "%H:%M").time()
@@ -121,9 +128,9 @@ def run_session_scan_and_alert():
     Quét dòng tiền lớn trong phiên và gửi cảnh báo khẩn cấp tới Telegram.
     Đồng thời kiểm tra ngưỡng cắt lỗ / chốt lời danh mục.
     """
-    now = datetime.now()
+    now = get_vn_now()
     time_str = now.strftime("%H:%M:%S")
-    logger.info(f"[{time_str}] Bắt đầu chu kỳ quét dòng tiền trong phiên...")
+    logger.info(f"[{time_str}] Bắt đầu chu kỳ quét dòng tiền trong phiên (Giờ VN)...")
 
     try:
         # 1. Quét dòng tiền lớn
@@ -260,20 +267,20 @@ def run_session_scan_and_alert():
 
 
 def check_and_run_eod_summary():
-    """Gửi tổng kết thị trường và tình trạng danh mục cuối ngày lúc 15:15."""
+    """Gửi tổng kết thị trường và tình trạng danh mục cuối ngày lúc 15:15 (Giờ Việt Nam)."""
     global LAST_EOD_SENT_DATE
-    now = datetime.now()
+    now = get_vn_now()
     today_str = now.strftime("%Y-%m-%d")
 
     if not is_trading_day() or LAST_EOD_SENT_DATE == today_str:
         return
 
-    # Kiểm tra thời gian từ 15:15 đến 16:30
+    # Kiểm tra thời gian từ 15:15 đến 16:30 (Giờ Việt Nam)
     t_1515 = datetime.strptime("15:15", "%H:%M").time()
     t_1630 = datetime.strptime("16:30", "%H:%M").time()
 
     if t_1515 <= now.time() <= t_1630:
-        logger.info("Bắt đầu tạo bản tin tổng kết kết phiên 15:15...")
+        logger.info(f"[{now.strftime('%H:%M:%S')}] Bắt đầu tạo bản tin tổng kết kết phiên 15:15 (Giờ VN)...")
         try:
             summary = portfolio.get_summary()
             eod_msg = (
@@ -291,20 +298,20 @@ def check_and_run_eod_summary():
 
 
 def check_and_run_evening_strategy():
-    """Phân tích sâu mã dòng tiền số 1 thị trường lúc 20:00 tối để chuẩn bị cho phiên mai."""
+    """Phân tích sâu mã dòng tiền số 1 thị trường lúc 20:00 tối (Giờ Việt Nam) để chuẩn bị cho phiên mai."""
     global LAST_EVENING_SENT_DATE
-    now = datetime.now()
+    now = get_vn_now()
     today_str = now.strftime("%Y-%m-%d")
 
     if not is_trading_day() or LAST_EVENING_SENT_DATE == today_str:
         return
 
-    # Kiểm tra thời gian từ 20:00 đến 21:00
+    # Kiểm tra thời gian từ 20:00 đến 21:00 (Giờ Việt Nam)
     t_2000 = datetime.strptime("20:00", "%H:%M").time()
     t_2100 = datetime.strptime("21:00", "%H:%M").time()
 
     if t_2000 <= now.time() <= t_2100:
-        logger.info("Bắt đầu tạo bản tin chiến lược buổi tối 20:00...")
+        logger.info(f"[{now.strftime('%H:%M:%S')}] Bắt đầu tạo bản tin chiến lược buổi tối 20:00 (Giờ VN)...")
         try:
             # Quét tìm mã dẫn đầu dòng tiền hôm nay
             top_stocks = scan_smart_money(min_vol_ratio=1.2, min_price_change=0.5, top_n=3)
@@ -339,22 +346,22 @@ def check_and_run_evening_strategy():
 
 
 def run_scheduler_loop(interval_seconds: int = 60):
-    """Vòng lặp chính của trình lập lịch chạy nền 24/7."""
-    logger.info("=== TRADING SCHEDULER 24/7 ĐÃ ĐƯỢC KHỞI TẠO ===")
-    logger.info("• Theo dõi phiên giao dịch (T2-T6: 09:15-11:30 & 13:00-14:45)")
-    logger.info("• Báo cáo tổng kết phiên lúc 15:15")
-    logger.info("• Bản tin chiến lược sáng mai lúc 20:00")
+    """Vòng lặp chính của trình lập lịch chạy nền 24/7 (Chuẩn múi giờ Việt Nam)."""
+    logger.info("=== TRADING SCHEDULER 24/7 ĐÃ ĐƯỢC KHỞI TẠO (GIỜ VIỆT NAM GMT+7) ===")
+    logger.info("• Theo dõi phiên giao dịch (T2-T6: 09:15-11:30 & 13:00-14:45 VN)")
+    logger.info("• Báo cáo tổng kết phiên lúc 15:15 VN")
+    logger.info("• Bản tin chiến lược sáng mai lúc 20:00 VN")
 
-    last_session_scan = datetime.min
+    last_session_scan = None
 
     while True:
         try:
-            now = datetime.now()
+            now = get_vn_now()
 
             # 1. Kiểm tra nếu đang trong phiên giao dịch
             if is_in_trading_session():
                 # Quét mỗi 15 phút một lần
-                if (now - last_session_scan).total_seconds() >= 15 * 60:
+                if last_session_scan is None or (now - last_session_scan).total_seconds() >= 15 * 60:
                     run_session_scan_and_alert()
                     last_session_scan = now
 

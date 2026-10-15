@@ -78,6 +78,7 @@ def handle_exit(signum, frame):
 
 
 import json
+import telebot
 import socketserver
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
@@ -131,6 +132,24 @@ class WebhookAndHealthHandler(BaseHTTPRequestHandler):
                 "time": datetime.now().isoformat()
             }
             self.wfile.write(json.dumps(debug_info, indent=2).encode("utf-8"))
+            return
+
+        if self.path.startswith("/api/logs"):
+            self.send_response(200)
+            self.send_header("Content-type", "text/plain; charset=utf-8")
+            self.end_headers()
+            log_path = os.path.join(BASE_DIR, "data", "bot_247.log")
+            if os.path.exists(log_path):
+                try:
+                    with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+                        lines = f.readlines()
+                        last_lines = "".join(lines[-200:])
+                        self.wfile.write(last_lines.encode("utf-8"))
+                        return
+                except Exception as e:
+                    self.wfile.write(f"Lỗi đọc log: {e}".encode("utf-8"))
+                    return
+            self.wfile.write(b"Khong tim thay file log.")
             return
 
         self.send_response(200)
@@ -242,7 +261,7 @@ def start_telegram_thread() -> threading.Thread:
         logger.info("[Luồng 1] Khởi động Telegram Bot Polling 24/7...")
         # Đảm bảo xóa sạch Webhook cũ để Polling nhận 100% tin nhắn
         try:
-            bot.delete_webhook(drop_pending_updates=True)
+            bot.delete_webhook(drop_pending_updates=False)
             logger.info("[Luồng 1] Đã dọn dẹp Webhook cũ, sẵn sàng Polling trực tiếp từ Telegram.")
         except Exception as e:
             logger.warning(f"[Luồng 1] Xóa webhook: {e}")
@@ -253,7 +272,7 @@ def start_telegram_thread() -> threading.Thread:
                     bot._TeleBot__stop_polling.clear()
                 except Exception:
                     pass
-                bot.infinity_polling(timeout=10, long_polling_timeout=5, logger_level=logging.ERROR)
+                bot.infinity_polling(timeout=20, long_polling_timeout=20, logger_level=logging.ERROR)
             except Exception as e:
                 logger.error(f"[Luồng 1] Telegram polling gặp lỗi: {e}. Thử kết nối lại sau 5 giây...")
                 time.sleep(5)

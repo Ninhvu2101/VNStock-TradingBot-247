@@ -23,3 +23,5 @@ services:
         value: "true"
       - key: MALLOC_ARENA_MAX
         value: "2"
+      - key: TZ
+        value: "Asia/Ho_Chi_Minh"

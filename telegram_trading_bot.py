@@ -11,6 +11,7 @@ Tích hợp:
 import os
 import sys
 import time
+import json
 import threading
 import logging
 from datetime import datetime
@@ -54,9 +55,17 @@ BOT_START_TIME = time.time()
 BOT_TOKEN = os.getenv("TELEGRAM_TRADING_BOT_TOKEN", "8456004015:AAESODZZNeVs5E6YjpEEivb5DQHTiYek_9g")
 DEFAULT_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "6383178389")
 
-import json
+class GlobalExceptionHandler(telebot.ExceptionHandler):
+    def handle(self, exception):
+        logger.error(f"[TeleBot Global Exception] {exception}", exc_info=True)
+        return True  # Đánh dấu đã xử lý ngoại lệ, ngăn bot ngừng polling
 
-bot = telebot.TeleBot(BOT_TOKEN, parse_mode="Markdown")
+bot = telebot.TeleBot(
+    BOT_TOKEN,
+    parse_mode="Markdown",
+    num_threads=10,
+    exception_handler=GlobalExceptionHandler()
+)
 portfolio = PortfolioManager()
 
 # Quản lý danh sách chat_id đăng ký nhận thông báo tự động
@@ -95,36 +104,50 @@ def add_subscriber(chat_id: int):
 SUBSCRIBED_CHATS = get_subscribers()
 
 
-def send_chunked_message(chat_id: int, text: str, reply_markup=None):
-    """Gửi tin nhắn an toàn, tự động chia nhỏ nếu vượt quá 4000 ký tự."""
+def safe_send_message(chat_id: int, text: str, reply_markup=None, parse_mode: Optional[str] = "Markdown"):
+    """
+    Gửi tin nhắn an toàn tuyệt đối:
+    1. Thử gửi với parse_mode (mặc định Markdown).
+    2. Nếu lỗi Markdown (400 Bad Request/entity error), tự động xóa định dạng và gửi plain text (parse_mode=None).
+    3. Tự động chia nhỏ nếu tin nhắn vượt quá 4000 ký tự.
+    4. Bắt mọi ngoại lệ để không bao giờ làm gián đoạn luồng bot.
+    """
+    if not text:
+        return None
+
     max_len = 4000
-    if len(text) <= max_len:
-        try:
-            bot.send_message(chat_id, text, reply_markup=reply_markup)
-        except Exception:
-            # Thử gửi dạng text thuần nếu lỗi định dạng Markdown
-            bot.send_message(chat_id, text.replace("*", "").replace("`", ""), reply_markup=reply_markup)
-        return
-
-    # Chia thành các đoạn nhỏ
     parts = []
-    while len(text) > max_len:
-        split_idx = text.rfind("\n\n", 0, max_len)
-        if split_idx == -1:
-            split_idx = text.rfind("\n", 0, max_len)
-        if split_idx == -1:
-            split_idx = max_len
-        parts.append(text[:split_idx])
-        text = text[split_idx:].lstrip()
-    if text:
-        parts.append(text)
+    if len(text) <= max_len:
+        parts = [text]
+    else:
+        remaining = text
+        while len(remaining) > max_len:
+            split_idx = remaining.rfind("\n\n", 0, max_len)
+            if split_idx == -1:
+                split_idx = remaining.rfind("\n", 0, max_len)
+            if split_idx == -1:
+                split_idx = max_len
+            parts.append(remaining[:split_idx])
+            remaining = remaining[split_idx:].lstrip()
+        if remaining:
+            parts.append(remaining)
 
+    res = None
     for i, p in enumerate(parts):
         markup = reply_markup if i == len(parts) - 1 else None
         try:
-            bot.send_message(chat_id, p, reply_markup=markup)
-        except Exception:
-            bot.send_message(chat_id, p.replace("*", "").replace("`", ""), reply_markup=markup)
+            res = bot.send_message(chat_id, p, parse_mode=parse_mode, reply_markup=markup)
+        except Exception as e:
+            logger.warning(f"Lỗi gửi tin nhắn {parse_mode} tới {chat_id}: {e}. Đang gửi lại dạng plain text...")
+            try:
+                clean_p = p.replace("*", "").replace("`", "").replace("_", " ").replace("[", "(").replace("]", ")")
+                res = bot.send_message(chat_id, clean_p, parse_mode=None, reply_markup=markup)
+            except Exception as e2:
+                logger.error(f"Thất bại hoàn toàn khi gửi tin nhắn tới {chat_id}: {e2}")
+    return res
+
+# Alias tương thích ngược
+send_chunked_message = safe_send_message
 
 
 def broadcast_message(text: str, reply_markup=None):
@@ -132,7 +155,7 @@ def broadcast_message(text: str, reply_markup=None):
     subscribers = get_subscribers()
     for cid in subscribers:
         try:
-            send_chunked_message(cid, text, reply_markup=reply_markup)
+            safe_send_message(cid, text, reply_markup=reply_markup)
         except Exception as e:
             logger.error(f"Lỗi gửi broadcast đến chat_id {cid}: {e}")
 
@@ -179,11 +202,11 @@ def handle_scan(message):
     chat_id = message.chat.id
     add_subscriber(chat_id)
     bot.send_chat_action(chat_id, "typing")
-    bot.send_message(chat_id, "⏳ Đang quét dữ liệu toàn bộ 60 cổ phiếu hàng đầu thị trường...")
+    safe_send_message(chat_id, "⏳ Đang quét dữ liệu toàn bộ cổ phiếu hàng đầu thị trường...")
 
     results = scan_smart_money(min_vol_ratio=1.3, min_price_change=0.5, top_n=8)
     report = format_scan_report(results)
-    send_chunked_message(chat_id, report, reply_markup=get_main_keyboard())
+    safe_send_message(chat_id, report, reply_markup=get_main_keyboard())
     trim_memory()
 
 
@@ -193,7 +216,7 @@ def handle_portfolio(message):
     add_subscriber(chat_id)
     bot.send_chat_action(chat_id, "typing")
     summary = portfolio.get_summary()
-    send_chunked_message(chat_id, summary, reply_markup=get_main_keyboard())
+    safe_send_message(chat_id, summary, reply_markup=get_main_keyboard())
 
 
 @bot.message_handler(commands=["buy"])
@@ -203,14 +226,14 @@ def handle_buy(message):
     # Cú pháp: /buy <MÃ> <KHỐI_LƯỢNG> [ngan/dai]
     parts = message.text.strip().split()
     if len(parts) < 3:
-        bot.send_message(chat_id, "⚠️ Cú pháp: `/buy <MÃ> <SỐ_LƯỢNG> [ngan/dai]`\nVí dụ: `/buy HPG 2000 ngan`")
+        safe_send_message(chat_id, "⚠️ Cú pháp: `/buy <MÃ> <SỐ_LƯỢNG> [ngan/dai]`\nVí dụ: `/buy HPG 2000 ngan`")
         return
 
     ticker = parts[1].upper()
     try:
         shares = int(parts[2])
     except ValueError:
-        bot.send_message(chat_id, "⚠️ Số lượng cổ phiếu phải là số nguyên!")
+        safe_send_message(chat_id, "⚠️ Số lượng cổ phiếu phải là số nguyên!")
         return
 
     p_type = "short_term"
@@ -222,17 +245,19 @@ def handle_buy(message):
     sym = f"{ticker}.VN" if not ticker.endswith(".VN") else ticker
     try:
         t_obj = yf.Ticker(sym)
-        hist = t_obj.history(period="2d")
+        hist = t_obj.history(period="5d")
+        hist = hist.dropna(subset=["Close"])
+        hist = hist[hist["Close"] > 0]
         if hist.empty:
-            bot.send_message(chat_id, f"❌ Không tìm thấy mã cổ phiếu {ticker} trên sàn!")
+            safe_send_message(chat_id, f"❌ Không tìm thấy mã cổ phiếu {ticker} trên sàn!")
             return
         cur_price = float(hist["Close"].iloc[-1])
     except Exception as e:
-        bot.send_message(chat_id, f"❌ Lỗi lấy giá cổ phiếu: {e}")
+        safe_send_message(chat_id, f"❌ Lỗi lấy giá cổ phiếu: {e}")
         return
 
     res = portfolio.buy(ticker, cur_price, shares, portfolio_type=p_type, rationale="Lệnh đặt qua Telegram")
-    bot.send_message(chat_id, res["message"])
+    safe_send_message(chat_id, res["message"])
 
 
 @bot.message_handler(commands=["sell"])
@@ -242,7 +267,7 @@ def handle_sell(message):
     # Cú pháp: /sell <MÃ> [KHỐI_LƯỢNG]
     parts = message.text.strip().split()
     if len(parts) < 2:
-        bot.send_message(chat_id, "⚠️ Cú pháp: `/sell <MÃ> [SỐ_LƯỢNG]`\nVí dụ: `/sell HPG 1000` (bỏ trống số lượng sẽ bán hết)")
+        safe_send_message(chat_id, "⚠️ Cú pháp: `/sell <MÃ> [SỐ_LƯỢNG]`\nVí dụ: `/sell HPG 1000` (bỏ trống số lượng sẽ bán hết)")
         return
 
     ticker = parts[1].upper()
@@ -253,17 +278,19 @@ def handle_sell(message):
     sym = f"{ticker}.VN" if not ticker.endswith(".VN") else ticker
     try:
         t_obj = yf.Ticker(sym)
-        hist = t_obj.history(period="2d")
+        hist = t_obj.history(period="5d")
+        hist = hist.dropna(subset=["Close"])
+        hist = hist[hist["Close"] > 0]
         if hist.empty:
-            bot.send_message(chat_id, f"❌ Không tìm thấy mã cổ phiếu {ticker} trên sàn!")
+            safe_send_message(chat_id, f"❌ Không tìm thấy mã cổ phiếu {ticker} trên sàn!")
             return
         cur_price = float(hist["Close"].iloc[-1])
     except Exception as e:
-        bot.send_message(chat_id, f"❌ Lỗi lấy giá cổ phiếu: {e}")
+        safe_send_message(chat_id, f"❌ Lỗi lấy giá cổ phiếu: {e}")
         return
 
     res = portfolio.sell(ticker, cur_price, shares=shares, rationale="Lệnh bán chủ động qua Telegram")
-    bot.send_message(chat_id, res["message"])
+    safe_send_message(chat_id, res["message"])
 
 
 @bot.message_handler(commands=["sheet"])
@@ -296,7 +323,7 @@ def handle_autotrade(message):
     try:
         from trading_scheduler import get_autotrade_config, set_autotrade_enabled
     except Exception:
-        bot.send_message(chat_id, "⚠️ Không tìm thấy module scheduler.")
+        safe_send_message(chat_id, "⚠️ Không tìm thấy module scheduler.")
         return
 
     parts = message.text.strip().split()
@@ -304,7 +331,7 @@ def handle_autotrade(message):
         action = parts[1].lower()
         if action in ("on", "bat", "1", "true", "start"):
             set_autotrade_enabled(True)
-            bot.send_message(
+            safe_send_message(
                 chat_id,
                 "🟢 *ĐÃ BẬT CHẾ ĐỘ AUTO-TRADING TOÀN DIỆN!*\n"
                 "───────────────────\n"
@@ -316,7 +343,7 @@ def handle_autotrade(message):
             return
         elif action in ("off", "tat", "0", "false", "stop"):
             set_autotrade_enabled(False)
-            bot.send_message(
+            safe_send_message(
                 chat_id,
                 "⏸️ *ĐÃ TẮT CHẾ ĐỘ TỰ ĐỘNG MUA!*\n"
                 "───────────────────\n"
@@ -370,36 +397,40 @@ def handle_status(message):
         "───────────────────\n"
         "💡 *Lưu ý:* Bot đang chạy 100% trên Cloud Render. Bạn có thể TẮT MÁY TÍNH HOÀN TOÀN, bot vẫn hoạt động bình thường!"
     )
-    bot.send_message(chat_id, msg)
+    safe_send_message(chat_id, msg)
     trim_memory()
 
 
 @bot.message_handler(func=lambda msg: True)
 def handle_text(message):
     """Xử lý tin nhắn văn bản thông thường (nút bấm hoặc gõ tên mã cổ phiếu)."""
-    text = message.text.strip()
+    text = (message.text or "").strip()
+    if not text:
+        return
     chat_id = message.chat.id
     add_subscriber(chat_id)
 
-    if text == "🌊 Quét Dòng Tiền" or text == "🔥 Top Cổ Phiếu":
+    if text in ("🌊 Quét Dòng Tiền", "🔥 Top Cổ Phiếu"):
         handle_scan(message)
-    elif text == "💼 Xem Danh Mục":
+    elif text in ("💼 Xem Danh Mục",):
         handle_portfolio(message)
-    elif text == "📈 Google Sheet":
+    elif text in ("📈 Google Sheet",):
         handle_sheet(message)
-    elif text == "🤖 Auto-Trading":
+    elif text in ("🤖 Auto-Trading",):
         handle_autotrade(message)
-    elif text == "❓ Trợ Giúp":
+    elif text in ("❓ Trợ Giúp",):
         handle_start(message)
     elif text.startswith("/analyze ") or text.startswith("/a "):
-        ticker = text.split()[1].upper()
-        _process_analyze(chat_id, ticker)
+        parts = text.split()
+        if len(parts) >= 2:
+            ticker = parts[1].upper()
+            _process_analyze(chat_id, ticker)
     elif len(text) in (3, 4) and text.isalpha():
         # Người dùng gõ trực tiếp tên mã cổ phiếu (ví dụ: HPG, FPT, VNM, SSI)
         ticker = text.upper()
         _process_analyze(chat_id, ticker)
     else:
-        bot.send_message(
+        safe_send_message(
             chat_id,
             f"Tôi chưa hiểu lệnh `{text}`. Hãy gõ tên mã cổ phiếu (ví dụ: `HPG`, `FPT`) hoặc gõ `/help` để xem hướng dẫn.",
             reply_markup=get_main_keyboard()
@@ -409,37 +440,39 @@ def handle_text(message):
 def _process_analyze(chat_id: int, ticker: str):
     """Phân tích nhanh mã cổ phiếu theo yêu cầu của người dùng."""
     bot.send_chat_action(chat_id, "typing")
-    clean_ticker = ticker.replace(".VN", "").upper()
+    clean_ticker = ticker.replace(".VN", "").upper().strip()
     sym = f"{clean_ticker}.VN"
 
-    bot.send_message(chat_id, f"🔍 Đang truy xuất dữ liệu kỹ thuật và tin tức cho mã *{clean_ticker}*...")
+    safe_send_message(chat_id, f"🔍 Đang truy xuất dữ liệu kỹ thuật và tin tức cho mã *{clean_ticker}*...")
 
     try:
         t_obj = yf.Ticker(sym)
-        hist = t_obj.history(period="3mo")
+        hist = t_obj.history(period="1mo")
         if hist.empty:
-            hist = t_obj.history(period="1mo")
+            hist = t_obj.history(period="5d")
+        hist = hist.dropna(subset=["Close", "Volume"])
+        hist = hist[hist["Close"] > 0]
         if hist.empty:
-            bot.send_message(chat_id, f"❌ Không tìm thấy dữ liệu cho mã `{clean_ticker}`!")
+            safe_send_message(chat_id, f"❌ Không tìm thấy dữ liệu cho mã `{clean_ticker}` trên sàn HOSE/HNX!")
             return
 
         cur_price = float(hist["Close"].iloc[-1])
         prev_price = float(hist["Close"].iloc[-2]) if len(hist) >= 2 else cur_price
-        pct = ((cur_price - prev_price) / prev_price) * 100.0
+        pct = ((cur_price - prev_price) / prev_price) * 100.0 if prev_price > 0 else 0.0
         pct_sign = "+" if pct > 0 else ""
 
         vol = float(hist["Volume"].iloc[-1])
-        vol_sma20 = float(hist["Volume"].rolling(20).mean().iloc[-2]) if len(hist) >= 20 else float(hist["Volume"].mean())
+        vol_sma20 = float(hist["Volume"].rolling(20, min_periods=3).mean().iloc[-2]) if len(hist) >= 4 else float(hist["Volume"].mean())
         vol_ratio = vol / vol_sma20 if vol_sma20 > 0 else 1.0
 
         # Phân tích đường trung bình
         ema10 = float(hist["Close"].ewm(span=10, adjust=False).mean().iloc[-1])
-        sma50 = float(hist["Close"].rolling(50, min_periods=10).mean().iloc[-1])
+        sma50 = float(hist["Close"].rolling(50, min_periods=5).mean().iloc[-1])
         trend = "Tăng ngắn hạn (Trên EMA10)" if cur_price > ema10 else "Điều chỉnh/Tích lũy (Dưới EMA10)"
 
         # Phân tích Hệ thống Ichimoku Kinko Hyo (Tenkan 9, Kijun 26, Senkou Span 52)
-        h_series = hist["High"]
-        l_series = hist["Low"]
+        h_series = hist["High"].dropna()
+        l_series = hist["Low"].dropna()
         t_len = min(9, len(h_series))
         k_len = min(26, len(h_series))
         b_len = min(52, len(h_series))
@@ -462,22 +495,20 @@ def _process_analyze(chat_id: int, ticker: str):
         tk_signal = "⚡ Tenkan cắt trên Kijun (Golden Cross - Tín hiệu MUA)" if tenkan >= kijun else "🔻 Tenkan nằm dưới Kijun"
         kumo_type = "Mây Xanh (Tăng)" if span_a >= span_b else "Mây Đỏ (Giảm)"
 
-        info = t_obj.info or {}
-        company_name = info.get("shortName") or info.get("longName") or clean_ticker
-        pe = info.get("trailingPE")
-        pb = info.get("priceToBook")
-        pe_str = f"{pe:.1f}" if pe else "N/A"
-        pb_str = f"{pb:.2f}" if pb else "N/A"
-
-        # Lấy tin tức mới nhất từ ddgs
+        # Lấy tin tức mới nhất từ ddgs an toàn
         news_snippet = ""
         try:
-            from ddgs import DDGS
-            news_items = list(DDGS().news(query=f"cổ phiếu {clean_ticker}", max_results=2))
+            try:
+                from duckduckgo_search import DDGS
+            except ImportError:
+                from ddgs import DDGS
+            news_items = list(DDGS().news(keywords=f"cổ phiếu {clean_ticker}", max_results=2))
             if news_items:
                 news_snippet = "\n📰 *Tin tức mới nhất:*\n"
                 for item in news_items:
-                    news_snippet += f"• {item.get('title')} ({item.get('source')})\n"
+                    t_str = str(item.get("title", "")).replace("*", "").replace("`", "").replace("_", " ")
+                    s_str = str(item.get("source", "")).replace("*", "").replace("`", "").replace("_", " ")
+                    news_snippet += f"• {t_str} ({s_str})\n"
         except Exception:
             pass
 
@@ -500,11 +531,10 @@ def _process_analyze(chat_id: int, ticker: str):
             tp = round(cur_price * 1.10, 0)
 
         msg = (
-            f"📊 *PHÂN TÍCH TOÀN DIỆN: {clean_ticker} - {company_name}*\n"
+            f"📊 *PHÂN TÍCH TOÀN DIỆN: {clean_ticker}*\n"
             f"───────────────────\n"
             f"💵 *Giá hiện tại:* `{cur_price:,.0f} VND` ({pct_sign}{pct:.2f}%)\n"
             f"📊 *Thanh khoản:* `{vol:,.0f}` cp (*{vol_ratio:.2f}x* MA20)\n"
-            f"📈 *Định giá Cơ bản:* P/E = `{pe_str}` | P/B = `{pb_str}`\n"
             f"📉 *Xu hướng MA:* {trend}\n"
             f"───────────────────\n"
             f"☁️ *HỆ THỐNG ICHIMOKU KINKO HYO:*\n"
@@ -512,7 +542,7 @@ def _process_analyze(chat_id: int, ticker: str):
             f"• *Mây Kumo:* `{kumo_bot:,.0f} - {kumo_top:,.0f} VND` ({kumo_type})\n"
             f"• *Vị thế Giá:* {ichi_pos}\n"
             f"• *Tín hiệu TK:* {tk_signal}\n"
-            f"{news_snippet}\n"
+            f"{news_snippet}"
             f"───────────────────\n"
             f"🎯 *KHUYẾN NGHỊ HÀNH ĐỘNG:* {rec}\n"
             f"• Vùng mua gom: `{cur_price:,.0f} VND`\n"
@@ -521,9 +551,10 @@ def _process_analyze(chat_id: int, ticker: str):
             f"• Chốt lời mục tiêu (TP +15%): `{tp:,.0f} VND`\n"
             f"• Lưu ý chu kỳ: Tuân thủ quy tắc thanh toán T+2.5 sàn Việt Nam."
         )
-        send_chunked_message(chat_id, msg, reply_markup=get_main_keyboard())
+        safe_send_message(chat_id, msg, reply_markup=get_main_keyboard())
     except Exception as e:
-        bot.send_message(chat_id, f"❌ Lỗi khi phân tích mã {clean_ticker}: {e}")
+        logger.error(f"Lỗi khi phân tích mã {clean_ticker}: {e}", exc_info=True)
+        safe_send_message(chat_id, f"❌ Lỗi khi phân tích mã {clean_ticker}: {str(e)[:200]}")
     finally:
         trim_memory()
 
