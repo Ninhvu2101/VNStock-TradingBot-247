@@ -185,6 +185,7 @@ def push_to_github(
     # Lấy SHA commit hiện tại của main (nếu có)
     ref_res = requests.get(f"https://api.github.com/repos/{username}/{repo_name}/git/refs/heads/main", headers=headers)
     parent_commit_sha = None
+    base_tree_sha = None
     if ref_res.status_code == 200:
         parent_commit_sha = ref_res.json()["object"]["sha"]
     else:
@@ -193,8 +194,18 @@ def push_to_github(
         if ref_master.status_code == 200:
             parent_commit_sha = ref_master.json()["object"]["sha"]
 
+    if parent_commit_sha:
+        try:
+            parent_commit_obj = requests.get(f"https://api.github.com/repos/{username}/{repo_name}/git/commits/{parent_commit_sha}", headers=headers).json()
+            base_tree_sha = parent_commit_obj.get("tree", {}).get("sha")
+        except Exception:
+            pass
+
     # Tạo tree mới
     tree_payload = {"tree": tree_items}
+    if base_tree_sha:
+        tree_payload["base_tree"] = base_tree_sha
+
     tree_res = requests.post(f"https://api.github.com/repos/{username}/{repo_name}/git/trees", headers=headers, json=tree_payload)
     if tree_res.status_code not in (200, 201):
         print(f"❌ Lỗi tạo Tree: {tree_res.text}")
